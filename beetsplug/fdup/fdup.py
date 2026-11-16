@@ -1,5 +1,6 @@
 import cProfile
 import collections
+import functools
 import io
 import logging
 import math
@@ -12,13 +13,14 @@ from typing import Any, Generator, Dict
 
 import beets
 import line_profiler
+import numpy as np
 from beets.dbcore import FieldQuery, types
 from beets.library import Item, parse_query_parts, Library
 from beets.library.fields import TYPE_BY_FIELD
 from beets.plugins import BeetsPlugin
 from beets.ui import Subcommand, print_, UserError
 from beets.util.functemplate import Template
-from bitarray import bitarray, util
+from bitarray import bitarray
 from confuse import templates
 from unidecode import unidecode
 
@@ -115,12 +117,64 @@ class TextPreprocessor:
         # Map to relatively random bit within [0,word_size)
         return (15331 * (a_val + self.m) ^ 17203 * b_val ^ 19121 * c_val + 12345) % self.word_size
 
+class FingerprintSet:
+    """Fingerprints of every distinct value of one field, packed into a uint64 matrix (one row per value)
+    so that numpy can compare whole blocks of values in one call."""
+
+    def __init__(self, preprocessor: TextPreprocessor, value_by_id: dict[int, str]):
+        index_by_value: dict[str, int] = {}
+        self.value_idx_by_id: dict[int, int] = {
+            id_: index_by_value.setdefault(value, len(index_by_value)) for id_, value in value_by_id.items()}
+        fingerprints = [preprocessor.text2fingerprint(value) for value in index_by_value]
+        n_bytes = -(-preprocessor.word_size // 64) * 8     # Round up to whole uint64 words.
+        self.words: np.ndarray = np.frombuffer(
+            b"".join(fp.bits.tobytes().ljust(n_bytes, b"\0") for fp in fingerprints), dtype=np.uint64,
+        ).reshape(len(fingerprints), n_bytes // 8)
+        self.counts: np.ndarray = np.array([fp.n for fp in fingerprints], dtype=np.int64)
+
 @line_profiler.profile
-def _compare_fps(fp_a: Fingerprint, fp_b: Fingerprint, inv_word_size: float, diff_pen: float) -> float:
-    avg = fp_a.n * fp_b.n * inv_word_size - 0.001
-    hits = util.count_and(fp_a.bits, fp_b.bits)
-    denom = (fp_a.n if fp_a.n < fp_b.n else fp_b.n) - avg + diff_pen * (fp_a.n + fp_b.n - hits - hits)
+def _compare_fps(
+        words_a: np.ndarray, n_a: np.ndarray, words_b: np.ndarray, n_b: np.ndarray,
+        inv_word_size: float, diff_pen: float) -> np.ndarray:
+    """Score fingerprints 'a' against fingerprints 'b', element-wise with numpy broadcasting.
+    words_* hold the packed fingerprint bits (last axis), n_* the corresponding number of set bits."""
+    hits = np.bitwise_count(words_a & words_b).sum(axis=-1, dtype=np.int64)
+    avg = n_a * n_b * inv_word_size - 0.001
+    denom = np.minimum(n_a, n_b) - avg + diff_pen * (n_a + n_b - hits - hits)
     return (hits - avg) / denom
+
+# Caps the temporary (rows x cols x words) array built by each _compare_fps call in _matching_pairs.
+_MAX_BLOCK_CELLS = 1 << 20
+
+@line_profiler.profile
+def _matching_pairs(
+        fps: FingerprintSet,
+        compare: typing.Callable[..., np.ndarray],
+        threshold: float,
+        rows: np.ndarray,
+        cols: np.ndarray | None = None,
+) -> Generator[tuple[int, int, float], Any, None]:
+    """Yield (row_value, col_value, score) for each pair of value indices scoring above the threshold.
+    If cols is None, rows are matched against each other and each unordered pair is yielded once."""
+    triangular = cols is None
+    if triangular:
+        cols = rows
+    if len(rows) == 0 or len(cols) == 0:
+        return
+    row_words, row_counts = fps.words[rows], fps.counts[rows]
+    col_words, col_counts = (row_words, row_counts) if triangular else (fps.words[cols], fps.counts[cols])
+    block = max(1, _MAX_BLOCK_CELLS // (len(cols) * fps.words.shape[1]))
+    for r0 in range(0, len(rows), block):
+        r1 = min(r0 + block, len(rows))
+        c0 = r0 + 1 if triangular else 0    # When triangular, only compare against later values.
+        if c0 >= len(cols):
+            break
+        scores = compare(row_words[r0:r1, None], row_counts[r0:r1, None], col_words[None, c0:], col_counts[None, c0:])
+        i, j = np.nonzero(scores > threshold)
+        if triangular:
+            keep = j >= i                   # i.e. col (c0 + j) comes after row (r0 + i).
+            i, j = i[keep], j[keep]
+        yield from zip(rows[r0 + i].tolist(), cols[c0 + j].tolist(), scores[i, j].tolist())
 
 class MinItem(dict[str, Any]):
     """Repr of dict[str, Any]"""
@@ -348,6 +402,9 @@ class FDupPlugin(BeetsPlugin):
         # Fetch minimal information about the items for both sets 1 and 2.
         item_by_id, set1, set2 = self._fetch_items(lib, opts, args)
 
+        # Fingerprint each distinct value of each field once, up front.
+        self._fingerprint_items(item_by_id)
+
         # Match items 1 against items 2.
         self._log.info("Finding matches...")
         matches_generator = self._find_matches2(item_by_id, set1, set2)
@@ -364,8 +421,12 @@ class FDupPlugin(BeetsPlugin):
         # Initialise class fields:
         self._fieldnames: list[str] = self.config["fields"].get()
         self._fingerprinters_by_field: dict[str, TextPreprocessor] = {}
-        self._compare_fps_by_field: dict[str, typing.Callable[[Fingerprint, Fingerprint], float]] = {}
+        self._compare_fps_by_field: dict[str, typing.Callable[..., np.ndarray]] = {}
         self._threshold_by_field: dict[str, float] = {}
+        self._fps_by_field: dict[str, FingerprintSet] = {}
+
+        # Command line overrides, applied to every field.
+        cli_threshold: float | None = getattr(opts, "match_threshold", None)
 
         # Default field configs
         defaults = self.config["default_field_config"]
@@ -384,11 +445,15 @@ class FDupPlugin(BeetsPlugin):
             word_size = field_config["word_size"].get(templates.Integer(default_word_size))
             diff_pen = field_config["difference_penalty"].get(templates.Number(default_diff_pen))
             cmp_thresh = field_config["match_threshold"].get(templates.Number(default_cmp_thresh))
+            if cli_threshold is not None:
+                cmp_thresh = cli_threshold
             inv_word_size = 1.0 / word_size
 
             # Cache configured instances used multiple times per field:
+            # (partial binds the current values; a lambda would see the last loop iteration's values instead).
             self._fingerprinters_by_field[fieldname] = TextPreprocessor(alphabet=alphabet, word_size=word_size)
-            self._compare_fps_by_field[fieldname] = lambda x, y: _compare_fps(x, y, inv_word_size, diff_pen)
+            self._compare_fps_by_field[fieldname] = functools.partial(
+                _compare_fps, inv_word_size=inv_word_size, diff_pen=diff_pen)
             self._threshold_by_field[fieldname] = cmp_thresh
 
     def _fetch_items(self, lib: Library, opts: Values, args: list[str]) -> tuple[dict[int, MinItem], set[int], set[int]]:
@@ -414,6 +479,13 @@ class FDupPlugin(BeetsPlugin):
 
         return item_by_id, set1, set2
 
+    def _fingerprint_items(self, item_by_id: dict[int, MinItem]):
+        self._log.info("Fingerprinting...")
+        for fieldname in self._fieldnames:
+            self._fps_by_field[fieldname] = FingerprintSet(
+                self._fingerprinters_by_field[fieldname],
+                {id_: unidecode(item[fieldname]).casefold() for id_, item in item_by_id.items()})
+
     @line_profiler.profile
     def _find_matches2(
             self,
@@ -424,76 +496,54 @@ class FDupPlugin(BeetsPlugin):
     ) -> Generator[tuple[int, list[Match]], Any, None]:
         """"""
         fieldname = self._fieldnames[fieldname_idx]
+        fps = self._fps_by_field[fieldname]
         compare_fps = self._compare_fps_by_field[fieldname]
         threshold = self._threshold_by_field[fieldname]
-        # self._log.info(f"XYZZY: {fieldname}, with threshold {threshold}")
 
-        # Aggregate by fieldname value.
-        ids_by_value_1: dict[str, set[int]] = collections.defaultdict(set[int])
-        ids_by_value_2: dict[str, set[int]] = collections.defaultdict(set[int])
-        for id in set1: ids_by_value_1[unidecode(item_by_id[id][fieldname]).casefold()].add(id)
-        for id in set2: ids_by_value_2[unidecode(item_by_id[id][fieldname]).casefold()].add(id)
+        # Aggregate by fieldname value (as an index into the field's FingerprintSet).
+        ids_by_value_1: dict[int, set[int]] = collections.defaultdict(set[int])
+        ids_by_value_2: dict[int, set[int]] = collections.defaultdict(set[int])
+        for id in set1: ids_by_value_1[fps.value_idx_by_id[id]].add(id)
+        for id in set2: ids_by_value_2[fps.value_idx_by_id[id]].add(id)
 
-        # Pull out various views of the sets:
-        all_values = ids_by_value_1.keys() | ids_by_value_2.keys()
-        common_values = set(ids_by_value_1.keys()) & set(ids_by_value_2.keys())
-        set2only_values = set(ids_by_value_2.keys()).difference(ids_by_value_1.keys())
+        # Pull out various views of the sets, as arrays of value indices:
+        def as_array(values: typing.Collection[int]) -> np.ndarray:
+            return np.fromiter(values, dtype=np.intp, count=len(values))
+        common_values = as_array(ids_by_value_1.keys() & ids_by_value_2.keys())
+        set1only_values = as_array(ids_by_value_1.keys() - ids_by_value_2.keys())
+        set2only_values = as_array(ids_by_value_2.keys() - ids_by_value_1.keys())
 
-        # Fingerprint items if they haven't already been.
-        fingerprinter = self._fingerprinters_by_field[fieldname]
-        fp_by_value: dict[str, Fingerprint] = {}
-        for value in all_values:
-            if value not in fp_by_value:
-                fp_by_value[value] = fingerprinter.text2fingerprint(value)
-
-        # Calc matches for common items (will be used multiple times):
-        value_matches: dict[str, set[str]] = collections.defaultdict(set[str])
-        cmp_values: dict[tuple[str, str], float] = {}
-        common_values_list = list(common_values)
-        for i, value1 in enumerate(common_values_list):
-            fp1 = fp_by_value[value1]
-            for value2 in common_values_list[i + 1:]:
-                cmp = compare_fps(fp1, fp_by_value[value2])
-                if cmp > threshold:
-                    value_matches[value1].add(value2)
-                    value_matches[value2].add(value1)
-                    values_pair = (value1, value2) if value1 < value2 else (value2, value1)
-                    cmp_values[values_pair] = cmp
+        # Find all matching pairs of values:
+        #   - common values against each other (each pair compared once, recorded both ways),
+        #   - common values against values only in set2,
+        #   - values only in set1 against all values in set2.
+        matched_values: dict[int, dict[int, float]] = collections.defaultdict(dict)
+        for value1, value2, cmp in _matching_pairs(fps, compare_fps, threshold, common_values):
+            matched_values[value1][value2] = cmp
+            matched_values[value2][value1] = cmp
+        for value1, value2, cmp in _matching_pairs(fps, compare_fps, threshold, common_values, set2only_values):
+            matched_values[value1][value2] = cmp
+        if len(set1only_values) > 0:
+            all_values2 = as_array(ids_by_value_2.keys())
+            for value1, value2, cmp in _matching_pairs(fps, compare_fps, threshold, set1only_values, all_values2):
+                matched_values[value1][value2] = cmp
 
         # Loop over set1 values:
         for value1, ids1 in ids_by_value_1.items():
-            is_common1 = value1 in common_values
-            fp1 = fp_by_value[value1]
 
-            # Calculate all ids in set2 whose value matches against value1.
-            # If value1 is in common set, then we've already calculated all common-value matches:
-            matching_ids: set[int] = set()
-            cmps: dict[int, float] = {}
-            if is_common1:
-                matching_ids |= ids_by_value_2[value1]
-                cmps.update({x: 1.0 for x in ids_by_value_2[value1]})
-                for value2 in value_matches[value1]:
-                    matching_ids |= ids_by_value_2[value2]
-                    cmp = cmp_values[(value1, value2) if value1 < value2 else (value2, value1)]
-                    cmps.update({x: cmp for x in ids_by_value_2[value2]})
-
-            # Check for other non-common-value matches
-            remaining_values2 = set2only_values if is_common1 else ids_by_value_2.keys()
-            for value2 in remaining_values2:
-                cmp = compare_fps(fp1, fp_by_value[value2])
-                if cmp > threshold:
-                    matching_ids |= ids_by_value_2[value2]
-                    cmps.update({x: cmp for x in ids_by_value_2[value2]})
-                    # self._log.info(f"    xyzzy: value1: {value1} now has {len(matching_ids)} matching ids")
+            # Collect all ids in set2 whose value matches value1, along with their match value.
+            # Ids with exactly the same value are a perfect match.
+            cmps: dict[int, float] = dict.fromkeys(ids_by_value_2.get(value1, ()), 1.0)
+            for value2, cmp in matched_values.get(value1, {}).items():
+                cmps.update(dict.fromkeys(ids_by_value_2[value2], cmp))
+            matching_ids = cmps.keys()
 
             # If no matches, skip.
             if len(matching_ids) == 0:
-                # self._log.info(f"  xyzzy: value1: {value1} has no matching ids, exiting")
                 continue
 
             # If ids1 and matching_ids are the same single id, skip; we would remove this before returning anyway.
             if len(ids1) == 1 and len(matching_ids) == 1 and ids1 == matching_ids:
-                # self._log.info(f"  xyzzy: value1: {value1} only has 1 item, and it matches itself, exiting")
                 continue
 
             # All items in ids1 therefore match with all matching_ids.
@@ -501,13 +551,13 @@ class FDupPlugin(BeetsPlugin):
             if fieldname_idx == len(self._fieldnames) - 1:
                 for id1 in ids1:
                     # Remove matches of the item with itself.
-                    matches = [Match(id1, x, fieldname, cmps[x]) for x in matching_ids if x != id1]
+                    matches = [Match(id1, x, fieldname, cmp) for x, cmp in cmps.items() if x != id1]
                     if len(matches) > 0:
                         yield id1, matches
                 continue
 
             # Otherwise, filter these results further by recursively calling this function with the next fieldname.
-            for id1, matches in self._find_matches2(item_by_id, ids1, matching_ids, fieldname_idx + 1):
+            for id1, matches in self._find_matches2(item_by_id, ids1, set(matching_ids), fieldname_idx + 1):
                 for match in matches:
                     match.with_fit(fieldname, cmps[match.id2])
                 yield id1, matches
