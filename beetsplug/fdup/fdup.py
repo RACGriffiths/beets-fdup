@@ -19,7 +19,7 @@ from beets.library import Item, parse_query_parts, Library
 from beets.library.fields import TYPE_BY_FIELD
 from beets.plugins import BeetsPlugin
 from beets.ui import Subcommand, print_, UserError
-from beets.util.functemplate import Template
+from beets.util.functemplate import template
 from bitarray import bitarray
 from confuse import templates
 from unidecode import unidecode
@@ -183,7 +183,8 @@ class MinItem(dict[str, Any]):
         if not format_spec:
             format_spec = beets.config["format_item"].as_str()
         assert isinstance(format_spec, str)
-        return Template(format_spec).substitute(self.formatted())
+        # template() caches the compiled Template; constructing a new one per item dominated output time.
+        return template(format_spec).substitute(self.formatted())
 
     def formatted(self) -> dict[str, str]:
         """Get a mapping containing all values on this object formatted
