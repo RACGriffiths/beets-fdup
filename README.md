@@ -1,93 +1,171 @@
-# beet-fdup
+# beets-fdup
 
+A [beets](https://beets.io/) plugin that finds duplicate tracks in your library by **fuzzy matching** their fields, by
+default the artist and title.
 
+beets' built-in [`duplicates`](https://beets.readthedocs.io/en/stable/plugins/duplicates.html) plugin finds items
+with identical keys (e.g. the same MusicBrainz ID). `fdup` finds tracks that *look* the same even when their tags
+differ, for example:
 
-## Getting started
+- `The Beatles - Hey Jude` and `Beatles - Hey Jude (Remastered 2009)`
+- `Blur - Coffee & TV` and `Blur - Coffee and TV`
+- `Andrea Bocelli - Con Te Partirò` and `Andrea Bocelli - Time to Say Goodbye (Con Te Partirò)`
 
-To make it easy for you to get started with GitLab, here's a list of recommended next steps.
-
-Already a pro? Just edit this README.md and make it your own. Want to make it easy? [Use the template at the bottom](#editing-this-readme)!
-
-## Add your files
-
-- [ ] [Create](https://docs.gitlab.com/ee/user/project/repository/web_editor.html#create-a-file) or [upload](https://docs.gitlab.com/ee/user/project/repository/web_editor.html#upload-a-file) files
-- [ ] [Add files using the command line](https://docs.gitlab.com/topics/git/add_files/#add-files-to-a-git-repository) or push an existing Git repository with the following command:
-
-```
-cd existing_repo
-git remote add origin https://gitlab.com/racgriffiths/beet-fdup.git
-git branch -M main
-git push -uf origin main
-```
-
-## Integrate with your tools
-
-- [ ] [Set up project integrations](https://gitlab.com/racgriffiths/beet-fdup/-/settings/integrations)
-
-## Collaborate with your team
-
-- [ ] [Invite team members and collaborators](https://docs.gitlab.com/ee/user/project/members/)
-- [ ] [Create a new merge request](https://docs.gitlab.com/ee/user/project/merge_requests/creating_merge_requests.html)
-- [ ] [Automatically close issues from merge requests](https://docs.gitlab.com/ee/user/project/issues/managing_issues.html#closing-issues-automatically)
-- [ ] [Enable merge request approvals](https://docs.gitlab.com/ee/user/project/merge_requests/approvals/)
-- [ ] [Set auto-merge](https://docs.gitlab.com/user/project/merge_requests/auto_merge/)
-
-## Test and Deploy
-
-Use the built-in continuous integration in GitLab.
-
-- [ ] [Get started with GitLab CI/CD](https://docs.gitlab.com/ee/ci/quick_start/)
-- [ ] [Analyze your code for known vulnerabilities with Static Application Security Testing (SAST)](https://docs.gitlab.com/ee/user/application_security/sast/)
-- [ ] [Deploy to Kubernetes, Amazon EC2, or Amazon ECS using Auto Deploy](https://docs.gitlab.com/ee/topics/autodevops/requirements.html)
-- [ ] [Use pull-based deployments for improved Kubernetes management](https://docs.gitlab.com/ee/user/clusters/agent/)
-- [ ] [Set up protected environments](https://docs.gitlab.com/ee/ci/environments/protected_environments.html)
-
-***
-
-# Editing this README
-
-When you're ready to make this README your own, just edit this file and use the handy template below (or feel free to structure it however you want - this is just a starting point!). Thanks to [makeareadme.com](https://www.makeareadme.com/) for this template.
-
-## Suggestions for a good README
-
-Every project is different, so consider which of these sections apply to yours. The sections used in the template are suggestions for most open source projects. Also keep in mind that while a README can be too long and detailed, too long is better than too short. If you think your README is too long, consider utilizing another form of documentation rather than cutting out information.
-
-## Name
-Choose a self-explaining name for your project.
-
-## Description
-Let people know what your project can do specifically. Provide context and add a link to any reference visitors might be unfamiliar with. A list of Features or a Background subsection can also be added here. If there are alternatives to your project, this is a good place to list differentiating factors.
-
-## Badges
-On some READMEs, you may see small images that convey metadata, such as whether or not all the tests are passing for the project. You can use Shields to add some to your README. Many services also have instructions for adding a badge.
-
-## Visuals
-Depending on what you are making, it can be a good idea to include screenshots or even a video (you'll frequently see GIFs rather than actual videos). Tools like ttygif can help, but check out Asciinema for a more sophisticated method.
+and labels the differences between versions (live, remix, remaster, ...), while not matching titles such as
+`Exogenesis: Symphony, Part 2` and `Part 3`.
 
 ## Installation
-Within a particular ecosystem, there may be a common way of installing things, such as using Yarn, NuGet, or Homebrew. However, consider the possibility that whoever is reading your README is a novice and would like more guidance. Listing specific steps helps remove ambiguity and gets people to using your project as quickly as possible. If it only runs in a specific context like a particular programming language version or operating system or has dependencies that have to be installed manually, also add a Requirements subsection.
+
+Install it into the same Python environment as beets:
+
+```bash
+pip install git+https://gitlab.com/racgriffiths/beet-fdup.git
+```
+
+(If you installed beets with pipx: `pipx inject beets git+https://gitlab.com/racgriffiths/beet-fdup.git`.)
+
+Then enable it in your beets config (`beet config -e`):
+
+```yaml
+plugins: fdup
+```
+
+Requires Python 3.11+ and beets 2.10+.
 
 ## Usage
-Use examples liberally, and show the expected output if you can. It's helpful to have inline the smallest example of usage that you can demonstrate, while providing links to more sophisticated examples if they are too long to reasonably include in the README.
 
-## Support
-Tell people where they can go to for help. It can be any combination of an issue tracker, a chat room, an email address, etc.
+```bash
+beet fdup                                   # all duplicates in the library
+beet fdup artist:queen                      # duplicates among Queen tracks
+beet fdup --against-all album:greatest      # tracks on 'greatest...' albums with a duplicate anywhere in the library
+beet fdup year:..1980 ~~~ year:1981..       # duplicates of pre-1981 tracks among later ones
+beet fdup --group-results                   # groups of tracks that all match each other
+beet fdup --match-threshold 0.9             # stricter matching (1.0 = perfect match)
+```
 
-## Roadmap
-If you have ideas for releases in the future, it is a good idea to list them in the README.
+Queries use the normal [beets query syntax](https://beets.readthedocs.io/en/stable/reference/query.html). With one
+query, tracks are only compared with other tracks matching it, unless you add `--against-all`. With two queries
+separated by `~~~`, tracks matching the first are compared with tracks matching the second.
 
-## Contributing
-State if you are open to contributions and what your requirements are for accepting them.
+Output lists each track, followed by its duplicates, with any version labels that differ between them:
 
-For people who want to make changes to your project, it's helpful to have some documentation on how to get started. Perhaps there is a script that they should run or some environment variables that they need to set. Make these steps explicit. These instructions could also be useful to your future self.
+```
+*** The Beatles - Hey Jude (7:11) - /music/The Beatles/Hey Jude/01 Hey Jude.mp3
+ |_ Beatles - Hey Jude (Remastered 2009) (7:08) [remaster] - /music/Beatles/1/21 Hey Jude.mp3
+```
 
-You can also document commands to lint the code or run tests. These steps help to ensure high code quality and reduce the likelihood that the changes inadvertently break something. Having instructions for running tests is especially helpful if it requires external setup, such as starting a Selenium server for testing in a browser.
+With `--group-results`, each group is printed together, each track marked by which query it came from: `--<` the
+first query only, `---` both, `-->` the second query only.
 
-## Authors and acknowledgment
-Show your appreciation to those who have contributed to the project.
+## Configuration
 
-## License
-For open source projects, say how it is licensed.
+These are the defaults; set any of them under `fdup:` in your beets config.
 
-## Project status
-If you have run out of energy or time for your project, put a note at the top of the README saying that development has slowed down or stopped completely. Someone may choose to fork your project or volunteer to step in as a maintainer or owner, allowing your project to keep going. You can also make an explicit request for maintainers.
+```yaml
+fdup:
+  fields: [artist, title]     # items must match on all of these
+  group_results: no           # as --group-results
+  query_separator: "~~~"
+
+  default_field_config:       # settings for every field...
+    match_threshold: 0.75     # minimum score to match (1.0 = identical)
+    metric: overlap           # overlap: relative to the shorter value, so 'abba' matches 'abba & friends';
+                              # dice: relative to both, so a short value doesn't match a longer one containing it
+    difference_penalty: 0.025
+    word_size: 1536           # fingerprint size in bits
+    alphabet: "abcdefghijklmnopqrstuvwxyz 0123456789"
+    normalise:                # [regex, replacement] pairs, applied after removing accents and lower-casing
+      - ['\s*&\s*', ' and ']
+      - ['(?<=\b\w)\.(?=\w\b)', '']     # s.o.s. -> sos
+    extra_normalise: []       # more rules, applied after these (so you keep the defaults)
+    qualifiers: null          # how to split values into a core and qualifiers; null: don't (see below)
+    exact_key: null           # a field which, when both items have it, decides the match on its own
+
+  field_configs:              # ...overridden per field
+    title:
+      metric: dice
+      exact_key: mb_workid    # same MusicBrainz work: match, even if the titles differ; different works: don't
+      qualifiers: { ... }     # the defaults below
+
+  output:
+    separator: "\n"
+    src_fmt: "*** $artist - $title ($length) - $path\n"
+    dup_fmt: " |_ $artist - $title ($length)$fdup_versions - $path\n"
+```
+
+The output formats are [beets path formats](https://beets.readthedocs.io/en/stable/reference/pathformat.html). They
+can use `$fdup_score` (the match score) and `$fdup_versions` (the differing version labels), plus `$id`, `$path`,
+`$artist`, `$title`, `$length` and the fields being matched: fdup only reads those fields from the library, so others
+(e.g. `$album`) aren't available.
+
+### Qualifiers
+
+With `qualifiers` set, a value is split into a core and qualifiers: bracketed parts, and anything after a separator
+such as ` - `. A qualifier containing a version marker (e.g. `live`) gives a version label; any other is a subtitle.
+So `(Oh) Pretty Woman (Live) - 2011 Remaster` has the core `pretty woman`, the subtitle `oh` and the labels
+`live` and `remaster`.
+
+```yaml
+qualifiers:
+  brackets: ["()", "[]", "{}"]
+  separators: ['\s+-+\s+', ':\s+']    # regexes
+  version_markers:            # word: label ('' marks a version without a label). Set a word to null to remove it.
+    live: live
+    remastered: remaster
+    # ... see DEFAULT_QUALIFIERS in beetsplug/fdup/config.py for the full list
+  version_marker_patterns:    # regex: label
+    '\b(19|20)\d\d\b': ''
+  alias_threshold: 0.9        # how well a subtitle alone must match the other title (alternate titles)
+  subtitle_threshold: 0.75    # if both have subtitles, how well at least one pair must match
+  check_numbers: yes          # different part/movement numbers (part 2 vs part 3) mean different tracks
+  match_versions: yes         # match different versions (live vs studio, ...); no: only the same version
+```
+
+For example, to stop reporting live versions and remixes as duplicates of the studio track, and treat `(cover)` as a
+version marker:
+
+```yaml
+fdup:
+  field_configs:
+    title:
+      qualifiers:
+        match_versions: no
+        version_markers:
+          cover: cover
+```
+
+## How it works
+
+1. **Normalise** each value: remove accents, lower-case, apply the `normalise` rules.
+2. **Split** values into a core, subtitles and version labels (fields with `qualifiers`).
+3. **Fingerprint** each distinct value: hash its character n-grams into a bit array.
+4. **Compare** fingerprints in bulk with numpy, scoring the shared bits against what chance would give. Candidate
+   pairs are then checked with the qualifier rules (shared subtitles, part numbers, alternate titles, ...).
+5. **Combine** fields: items match if they match on every field (fields are matched in order, each narrowing the
+   candidates for the next). An `exact_key` overrides the fuzzy result where both items have one.
+
+## Development
+
+```bash
+python3 -m venv .venv
+.venv/bin/pip install -e ".[dev]"   # editable install: code changes take effect without reinstalling
+.venv/bin/pytest                    # tests
+.venv/bin/ruff check .              # lint
+```
+
+Layout:
+
+| Path | What's there |
+|---|---|
+| `beetsplug/fdup/__init__.py` | the plugin: the `fdup` command and its options |
+| `beetsplug/fdup/config.py` | default config, building a `FieldMatcher` per field |
+| `beetsplug/fdup/items.py` | fast fetching of just the needed fields (uses some beets internals) |
+| `beetsplug/fdup/parsing.py` | normalising, splitting values into core / subtitles / labels |
+| `beetsplug/fdup/fingerprint.py` | n-gram fingerprints, bulk comparison with numpy |
+| `beetsplug/fdup/matching.py` | per-field fuzzy matching, combined into item matches |
+| `beetsplug/fdup/grouping.py` | `--group-results` |
+| `beetsplug/fdup/output.py` | printing |
+| `tests/` | pytest tests; `test_plugin.py` runs `beet fdup` end to end on a temporary library |
+| `scripts/profile_fdup.py` | profile a `beet fdup` run with cProfile (or see its docstring for line_profiler) |
+
+`beetsplug/` deliberately has no `__init__.py`: it's a namespace package shared with beets and its other plugins.

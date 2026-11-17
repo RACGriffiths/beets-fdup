@@ -1,0 +1,52 @@
+[project]
+name = "beets-fdup"
+version = "0.1.0"
+description = "Beets plugin that finds duplicate tracks by fuzzy matching fields such as artist and title"
+readme = "README.md"
+authors = [{ name = "Ryan Griffiths" }]
+requires-python = ">=3.11"   # typing.Self
+dependencies = [
+    # fdup reads the library through some beets internals (see beetsplug/fdup/items.py), so stay within
+    # the major version it's tested against.
+    "beets>=2.10,<3",
+    "numpy>=2.0",            # np.bitwise_count
+    "bitarray>=3.0",
+    "unidecode>=1.3",
+    "confuse>=2.0",
+]
+classifiers = [
+    "Environment :: Console",
+    "Programming Language :: Python :: 3",
+    "Topic :: Multimedia :: Sound/Audio",
+]
+
+[project.urls]
+Repository = "https://gitlab.com/racgriffiths/beet-fdup"
+
+[project.optional-dependencies]
+# Development tools: pip install -e ".[dev]"
+dev = [
+    "pytest>=8",
+    "pytest-cov",
+    "responses",       # needed by beets' test helpers (beets.test.helper)
+    "ruff",
+    "line_profiler",   # scripts/profile.py
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+# beetsplug/ is a namespace package shared with beets and its other plugins: it must not have an __init__.py.
+packages = ["beetsplug"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F", "I", "UP", "B"]

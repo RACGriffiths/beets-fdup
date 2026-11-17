@@ -1,2 +1,17 @@
+# IDE
 .idea/
+
+# Python
 __pycache__/
+.venv/
+*.egg-info/
+build/
+dist/
+
+# Tools
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+*.lprof
+*.prof
