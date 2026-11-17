@@ -15,9 +15,18 @@ dependencies = [
     "unidecode>=1.3",
     "confuse>=2.0",
 ]
+keywords = ["beets", "beets-plugin", "music", "music-library", "duplicates", "fuzzy-matching"]
 classifiers = [
+    "Development Status :: 4 - Beta",
     "Environment :: Console",
+    "Intended Audience :: End Users/Desktop",
+    "Operating System :: OS Independent",
     "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
     "Topic :: Multimedia :: Sound/Audio",
 ]
 
@@ -37,6 +46,11 @@ dev = [
 [build-system]
 requires = ["hatchling>=1.27"]   # license / license-files as in PEP 639
 build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.sdist]
+# Only these (hatchling also always adds pyproject.toml and .gitignore): untracked local files must never end up on
+# PyPI. Hatchling skips what .gitignore lists, but not what .git/info/exclude does.
+include = ["/beetsplug", "/tests", "/README.md", "/LICENSE", "/CHANGELOG.md"]
 
 [tool.hatch.build.targets.wheel]
 # beetsplug/ is a namespace package shared with beets and its other plugins: it must not have an __init__.py.
