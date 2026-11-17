@@ -6,7 +6,6 @@ import logging
 import math
 import pstats
 import re
-import sqlite3
 import typing
 from math import prod
 from optparse import Values
@@ -16,7 +15,8 @@ import beets
 import confuse
 import line_profiler
 import numpy as np
-from beets.dbcore import FieldQuery, types
+from beets import context
+from beets.dbcore import AndQuery, Query, types
 from beets.library import Item, parse_query_parts, Library
 from beets.library.fields import TYPE_BY_FIELD
 from beets.plugins import BeetsPlugin
@@ -301,7 +301,7 @@ class FieldMatcher:
         index_by_value: dict[str, int] = {}
         self.value_idx_by_id: dict[int, int] = {}
         for id_, item in item_by_id.items():
-            raw = item[self.name]
+            raw = item[self.name] or ""     # E.g. None: a flexible attribute the item doesn't have.
             if raw not in normalised:
                 normalised[raw] = self.parser.normalise(raw)
             self.value_idx_by_id[id_] = index_by_value.setdefault(normalised[raw], len(index_by_value))
@@ -505,83 +505,85 @@ def _mock_get_items() -> list[MinItem]:
     return vals
 
 
-def _quick_fetch_items(lib, fields: set[str], args=None) -> list[MinItem]:
-    """Fetch desired fields from library, optionally filtered by query args."""
+def _quick_fetch_items(lib: Library, fields: set[str], args: list[str] | None = None) -> list[MinItem]:
+    """Fetch only the given fields of the items matching the query args (all items if there are none).
+
+    Much faster than lib.items(), which reads every column (lyrics included) and every flexible attribute of every
+    item, then builds a full Item for each. Values come back as an Item would give them (e.g. paths made absolute,
+    NULL as the field's default); a flexible attribute an item doesn't have is None."""
     # return _mock_get_items()
 
     # todo:
     #  - consider expanding to allow album fetches too.
     #  - or at least additionally operating on album flex fields.
 
-    # Split the desired fields according to whether they are fixed, or flex based.
-    desired_fields = fields | {"id"}    # Always return 'id'
-    item_fields = Item.all_db_fields - Item.other_db_fields
-    desired_fixed_fields = item_fields & desired_fields
-    desired_flex_fields = desired_fields - desired_fixed_fields
+    fields = set(fields) | {"id"}
 
-    # Quick exits for queries without filtering:
-    if args is None or len(args) == 0:
+    # Like lib.items(): resolve path queries and stored (relative) paths against this library's directory.
+    with context.music_dir(lib.directory):
+        query = parse_query_parts(args, Item)[0] if args else AndQuery([])
+        from_, where, params, slow = _sql_filter(query)
 
-        # Query the database to get the desired fields.
-        # If the desired fields are not just item fields, query the item flex table too.
-        with (lib.transaction() as tx):
-            rows = tx.query(f"SELECT {', '.join(desired_fixed_fields)} FROM items")
-            flex_rows = [] if len(desired_flex_fields) == 0 else tx.query(
-                f"SELECT * FROM item_attributes WHERE key IN ({", ".join(["?"] * len(desired_flex_fields))})",
-                list(desired_flex_fields))
-        items = _combine_fixed_and_flex(rows, flex_rows)
-        return [MinItem(item) for item in items]
+        # Slow parts are checked on Items built from just the fields they need, unless they use computed fields
+        # (getters like 'filesize'), or don't say what they need: then build full Items, as beets would.
+        needed = fields | (slow.field_names if slow else set())
+        full = slow is not None and (any(not q.field_names for q in slow.subqueries)
+                                     or bool(needed & Item._getters().keys()))
+        fixed = ["id", *sorted((Item._fields.keys() if full else needed & Item._fields.keys()) - {"id"})]
+        flex = None if full else sorted(needed - Item._fields.keys())   # None: all of them.
 
-    # Otherwise, we have to account for the filter fields too.
-    # Parse the query parts into a dbcore.Query, ignore the sort for now.
-    parsed_query = parse_query_parts(args, Item)[0]
-    query_fields = parsed_query.field_names
-    query_fixed_fields = query_fields & item_fields
-    query_flex_fields = query_fields - item_fields
+        with lib.transaction() as tx:
+            rows = tx.query(f"SELECT {', '.join(f'items.{f}' for f in fixed)} FROM {from_} WHERE {where}", params)
+            ids_sql = f"SELECT items.id FROM {from_} WHERE {where}"
+            if flex is None:
+                flex_rows = tx.query(
+                    f"SELECT entity_id, key, value FROM item_attributes WHERE entity_id IN ({ids_sql})", params)
+            elif flex:
+                flex_rows = tx.query(
+                    f"SELECT entity_id, key, value FROM item_attributes "
+                    f"WHERE key IN ({', '.join('?' * len(flex))}) AND entity_id IN ({ids_sql})", [*flex, *params])
+            else:
+                flex_rows = []
 
-    # Prepare the SQL WHERE term for the item table query.
-    # Note: monkey-patching to allow non-fast query clauses to be ignored without affecting fast query clauses.
-    original_method = FieldQuery.clause
-    try:
-        FieldQuery.clause = lambda self: self.col_clause() if self.fast else ("1", ())
-        where, params = parsed_query.clause()
-    finally:
-        FieldQuery.clause = original_method
+        flex_by_id: dict[int, dict[str, Any]] = collections.defaultdict(dict)
+        for entity_id, key, value in flex_rows:
+            flex_by_id[entity_id][key] = value
 
-    # Prepare the SQL items query term.
-    all_fixed_fields = desired_fixed_fields | query_fixed_fields
-    sql_fixed = f"SELECT {', '.join(all_fixed_fields)} FROM items WHERE {where or 1}"
-    params_fixed = params
+        # Convert the raw SQL values as Item does (relative path -> absolute, NULL -> '' or 0, ...).
+        fixed_types = [(f, Item._type(f).from_sql) for f in fields & Item._fields.keys()]
+        flex_types = [(f, Item._type(f).from_sql) for f in fields - Item._fields.keys()]
+        items: list[MinItem] = []
+        for row in rows:
+            values = dict(zip(fixed, row))
+            flex_values = flex_by_id.get(values["id"], {})
+            if slow and not slow.match(Item._awaken(lib, values, flex_values)):
+                continue
+            item = MinItem({f: from_sql(values[f]) for f, from_sql in fixed_types})
+            item.update({f: from_sql(flex_values[f]) if f in flex_values else None for f, from_sql in flex_types})
+            items.append(item)
+    return items
 
-    # Prepare the SQL flexible attributes query term (if any)
-    all_flex_fields = desired_flex_fields | query_flex_fields
-    needs_flex = len(all_flex_fields) > 0
-    if needs_flex:
-        sql_flex = (
-            "SELECT * FROM item_attributes WHERE "
-            f"key IN ({", ".join(["?"] * len(all_flex_fields))}) "
-            f"AND entity_id IN (SELECT id FROM items WHERE {where or 1})")
-        params_flex = list(all_flex_fields) + params
-
-    # Do the actual query:
-    with lib.transaction() as tx:
-        rows = tx.query(sql_fixed, params_fixed)
-        flex_rows = tx.query(sql_flex, params_flex) if needs_flex else []
-    items = _combine_fixed_and_flex(rows, flex_rows)
-
-    # If any of the query filters are based on flexible attributes, re-filter here (slow query)
-    if len(query_flex_fields) > 0:
-        items = [item for item in items if parsed_query.match(item)]
-
-    # Remove extraneous fields, only return what is desired.
-    return [MinItem({k: v for k, v in item.items() if k in desired_fields}) for item in items]
-
-def _combine_fixed_and_flex(fixed_rows: list[sqlite3.Row], flex_rows: list[sqlite3.Row]) -> list[dict]:
-    items_fixed_by_id = {row["id"]: dict(row) for row in fixed_rows}
-    items_flex_by_id = collections.defaultdict(dict[str, str])
-    for row in flex_rows:
-        items_flex_by_id[row["entity_id"]][row["key"]] = row["value"]
-    return [{**items_flex_by_id.get(id_, {}), **data} for id_, data in items_fixed_by_id.items()]
+def _sql_filter(query: Query) -> tuple[str, str, list[Any], AndQuery | None]:
+    """Split a query (an AND of parts) into SQL for the parts SQLite can evaluate (FROM and WHERE terms, params) and
+    the rest ('slow' parts, e.g. on flexible attributes), to check in Python. (lib.items() checks *every* part in
+    Python if any part is slow.) A part containing a slow NOT or OR goes to Python whole, so it stays correct."""
+    parts = query.subqueries if isinstance(query, AndQuery) else [query]
+    clauses: list[str] = []
+    params: list[Any] = []
+    fast: list[Query] = []
+    slow: list[Query] = []
+    for part in parts:
+        clause, part_params = part.clause()
+        if clause:
+            clauses.append(f"({clause})")
+            params.extend(part_params)
+            fast.append(part)
+        else:
+            slow.append(part)
+    from_ = "items"
+    if any(part.field_names & Item.other_db_fields for part in fast):
+        from_ += f" {Item.relation_join}"   # Album-only fields (e.g. artpath) are queried via a join, as in beets.
+    return from_, " AND ".join(clauses) or "1", params, AndQuery(slow) if slow else None
 
 # How titles are split into a core and qualifiers (see ValueParser). Also the fallback for any key missing from a
 # field's own 'qualifiers' config.
