@@ -45,6 +45,9 @@ class FieldMatcher:
             if raw not in normalised:
                 normalised[raw] = self.parser.normalise(raw)
             self.value_idx_by_id[id_] = index_by_value.setdefault(normalised[raw], len(index_by_value))
+        # The empty value's index, if any item has it (e.g. no title, or a value a normalise rule removed entirely).
+        # It matches nothing: see find_matches.
+        self.empty_value: int | None = index_by_value.get("")
         self.parsed: list[ParsedValue] = [self.parser.parse(value) for value in index_by_value]
 
         key_idx_by_text: dict[str, int] = {}
@@ -55,8 +58,8 @@ class FieldMatcher:
         self.main_keys: list[list[int]] = [sorted({key(p.core), key(p.full)}) for p in self.parsed]
         self.alias_keys: list[list[int]] = [sorted({key(s) for s in p.subtitles}) for p in self.parsed]
         self.fps = FingerprintSet(self.preprocessor, key_idx_by_text)
-        # Keys with nothing to fingerprint (e.g. emptied by a normalise rule) would score 1.0 against each other: leave
-        # them out of fuzzy matching. (Items with the same value still match.)
+        # Keys with nothing to fingerprint (e.g. only punctuation left by a normalise rule) would score 1.0 against each
+        # other: leave them out of fuzzy matching. (Items with the same non-empty value still match.)
         empty = set(np.flatnonzero(self.fps.counts == 0).tolist())
         if empty:
             self.main_keys = [[k for k in keys if k not in empty] for keys in self.main_keys]
@@ -238,12 +241,16 @@ def find_matches(
         ids_by_value_1[field.value_idx_by_id[id]].add(id)
     for id in set2:
         ids_by_value_2[field.value_idx_by_id[id]].add(id)
+    # An empty value (e.g. no title) says nothing about which track it is, so items with one match nothing. Otherwise
+    # every untagged track would be a duplicate of every other.
+    ids_by_value_1.pop(field.empty_value, None)
+    ids_by_value_2.pop(field.empty_value, None)
 
     # Ids in set2 by their exact key (e.g. mb_workid), if the field has one.
     ids2_by_key: dict[Any, set[int]] = collections.defaultdict(set[int])
     if field.exact_key:
         for id in set2:
-            if (key := field.exact_key_by_id[id]) is not None:
+            if field.value_idx_by_id[id] != field.empty_value and (key := field.exact_key_by_id[id]) is not None:
                 ids2_by_key[key].add(id)
 
     # Pull out various views of the sets, as arrays of value indices:

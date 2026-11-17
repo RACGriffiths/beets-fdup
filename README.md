@@ -82,12 +82,12 @@ These are the defaults; set any of them under `fdup:` in your beets config.
 
 ```yaml
 fdup:
-  fields: [artist, title]     # items must match on all of these
+  fields: [artist, title]     # text fields; items must match on all of these
   group_results: yes          # no: as --by-track (and --group-results overrides no)
   query_separator: "~~~"
 
   default_field_config:       # settings for every field...
-    match_threshold: 0.75     # minimum score to match (1.0 = identical)
+    match_threshold: 0.75     # minimum score to match, from 0 to 1 (1.0 = identical)
     metric: overlap           # overlap: relative to the shorter value, so 'abba' matches 'abba & friends';
                               # dice: relative to both, so a short value doesn't match a longer one containing it
     difference_penalty: 0.025
@@ -209,10 +209,25 @@ fdup:
           cover: cover
 ```
 
+### Empty values
+
+A track with an empty value in a matched field (no title, say) matches nothing, so untagged tracks aren't all reported
+as duplicates of each other. A value that a `normalise` rule removes entirely counts as empty too. For example, to skip
+generic titles such as `Intro`, which match between unrelated albums by the same artist:
+
+```yaml
+fdup:
+  field_configs:
+    title:
+      extra_normalise:
+        - ['^(intro|outro|interlude)$', '']
+```
+
 ## How it works
 
 1. **Normalise** each value: remove accents, lower-case, apply the `normalise` rules. A value of only symbols, such as
    an emoji title, is spelled out with Unicode names instead (`👋` → `waving hand sign`), so different symbols differ.
+   An empty value matches nothing.
 2. **Split** values into a core, subtitles and version labels (fields with `qualifiers`).
 3. **Fingerprint** each distinct value: hash its character n-grams into a bit array, ignoring characters that aren't in
    the `alphabet` (so `Help!` and `Help` are the same).
@@ -229,6 +244,9 @@ python3 -m venv .venv
 .venv/bin/pytest                    # tests
 .venv/bin/ruff check .              # lint
 ```
+
+CI (`.gitlab-ci.yml`) runs the tests with the oldest supported versions (Python 3.11, beets 2.10, numpy 2.0) and with
+the latest beets on Python 3.12 to 3.14, and runs ruff.
 
 Layout:
 

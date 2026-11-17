@@ -87,6 +87,16 @@ class TestMatching:
                              field_configs={"title": {"extra_normalise": [["[a-z]", ""]]}})
         assert matches == {}
 
+    def test_empty_values_dont_match(self):
+        # A missing artist or title says nothing about which track it is: untagged tracks aren't all duplicates.
+        assert matches_of([("", ""), ("", ""), ("ABBA", ""), ("ABBA", " "), ("", "Waterloo"), ("", "Waterloo")]) == {}
+
+    def test_values_a_normalise_rule_removes_dont_match(self):
+        # A rule that empties a value makes it count as missing, e.g. to skip generic titles.
+        items = [("Muse", "Intro"), ("Muse", "Intro"), ("Muse", "Uprising"), ("Muse", "Uprising")]
+        matches = matches_of(items, field_configs={"title": {"extra_normalise": [["^intro$", ""]]}})
+        assert set(matches) == {("Uprising", "Uprising")}
+
     def test_different_part_numbers(self):
         matches = matches_of([("Muse", "Exogenesis: Symphony, Part 2: Cross-Pollination"),
                               ("Muse", "Exogenesis: Symphony, Part 3: Redemption")])
@@ -166,6 +176,9 @@ class TestExactKey:
         matches = matches_of([("Muse", "Intro", "w1"), ("Muse", "intro", ""), ("Muse", "INTRO", "w2")])
         # Both keyed items match the unkeyed one, but not each other.
         assert set(matches) == {("Intro", "intro"), ("intro", "Intro"), ("INTRO", "intro"), ("intro", "INTRO")}
+
+    def test_same_key_doesnt_match_an_empty_title(self):
+        assert matches_of([("Muse", "", "w1"), ("Muse", "Uprising", "w1")]) == {}
 
     def test_same_key_needs_matching_artists(self):
         assert matches_of([("Leonard Cohen", "Hallelujah", "w1"), ("Jeff Buckley", "Hallelujah", "w1")]) == {}

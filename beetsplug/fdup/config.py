@@ -5,6 +5,7 @@ from collections.abc import Callable
 from typing import Any
 
 import confuse
+from beets.library import Item
 from beets.ui import UserError
 
 from .fingerprint import TextPreprocessor, compare_fps
@@ -109,12 +110,23 @@ _REPLACED_OUTPUT_KEYS = {
 def build_field_matchers(config: confuse.ConfigView, threshold: float | None = None) -> list[FieldMatcher]:
     """A FieldMatcher for each configured field, set up from the field's own config or the defaults.
     threshold, if given, overrides every field's match_threshold (the --match-threshold option)."""
+    if threshold is not None:
+        _check_threshold(threshold, "--match-threshold")
     fields: list[FieldMatcher] = []
     for fieldname in config["fields"].get(list):
+        # (Untyped flexible attributes are text too.)
+        if not issubclass(Item._type(fieldname).model_type, str):
+            raise UserError(f"fdup: fields: {fieldname} isn't a text field, so it can't be fuzzy-matched. To compare "
+                            f"only some tracks, use a query instead (e.g. 'beet fdup year:1990..1999').")
         field_config = functools.partial(_field_config, config, fieldname)
         word_size = field_config("word_size").get(int)
         metric = field_config("metric").as_choice(["overlap", "dice"])
         qualifiers = _qualifiers_config(field_config("qualifiers"))
+        if threshold is None:
+            threshold_view = field_config("match_threshold")
+            field_threshold = _check_threshold(threshold_view.as_number(), threshold_view.name)
+        else:
+            field_threshold = threshold
         # (partial binds the current values; a lambda would see the last loop iteration's values instead).
         compare = functools.partial(
             compare_fps, inv_word_size=1.0 / word_size, diff_pen=field_config("difference_penalty").as_number(),
@@ -124,7 +136,7 @@ def build_field_matchers(config: confuse.ConfigView, threshold: float | None = N
             TextPreprocessor(alphabet=field_config("alphabet").get(str), word_size=word_size),
             ValueParser(_normalise_rules(field_config), qualifiers),
             compare,
-            field_config("match_threshold").as_number() if threshold is None else threshold,
+            field_threshold,
             field_config("exact_key").get(),
             qualifiers))
     return fields
@@ -178,4 +190,13 @@ def _qualifiers_config(view: confuse.ConfigView) -> dict[str, Any] | None:
     qualifiers["version_markers"] = {w.casefold(): label for w, label in qualifiers["version_markers"].items()}
     if any(len(pair) != 2 for pair in qualifiers["brackets"]):
         raise UserError("fdup: each qualifiers.brackets entry must be an opening and closing character, e.g. '()'")
+    for key in ("alias_threshold", "subtitle_threshold"):
+        _check_threshold(qualifiers[key], f"{view.name}.{key}")
     return qualifiers
+
+
+def _check_threshold(value: Any, setting: str) -> float:
+    """value, if it's a valid threshold: a score from 0 to 1. setting says where it came from, for errors."""
+    if not isinstance(value, int | float) or not 0 <= value <= 1:
+        raise UserError(f"fdup: {setting} must be a number from 0 to 1 (1.0 = a perfect match), not {value!r}")
+    return float(value)

@@ -129,6 +129,48 @@ def test_match_threshold_option(beets_env, capsys, args, expected):
     assert fdup(beets_env, capsys, *args) == expected
 
 
+@pytest.mark.parametrize("threshold", ["7", "-0.1", "1.01"])
+def test_match_threshold_option_out_of_range_is_an_error(beets_env, capsys, threshold):
+    with pytest.raises(UserError, match="--match-threshold"):
+        run(beets_env, capsys, "--match-threshold", threshold)
+
+
+@pytest.mark.parametrize(("setting", "path"), [
+    ({"default_field_config": {"match_threshold": 1.5}}, "default_field_config.match_threshold"),
+    ({"field_configs": {"title": {"match_threshold": -1}}}, "field_configs.title.match_threshold"),
+    ({"field_configs": {"title": {"qualifiers": {"alias_threshold": 2}}}}, "qualifiers.alias_threshold"),
+    ({"field_configs": {"title": {"qualifiers": {"subtitle_threshold": "high"}}}}, "qualifiers.subtitle_threshold"),
+])
+def test_threshold_setting_out_of_range_is_an_error(beets_env, capsys, setting, path):
+    beets_env.config["fdup"].set(setting)
+    with pytest.raises(UserError, match=path):
+        run(beets_env, capsys)
+
+
+def test_tracks_with_empty_fields_arent_duplicates(beets_env, capsys):
+    # Untagged tracks (or ones with no title) aren't all duplicates of each other.
+    add(beets_env, ("", ""), ("", ""), ("ABBA", ""), ("ABBA", ""), ("", "Waterloo"), ("", "Waterloo"))
+    assert fdup(beets_env, capsys) == {}
+
+
+def test_flexible_attribute_as_a_field(beets_env, capsys):
+    beets_env.config["fdup"]["fields"].set(["artist", "title", "mood"])
+    add(beets_env, ("ABBA", "Waterloo"), ("ABBA", "Waterloo (live)"), mood="happy")
+    add(beets_env, ("ABBA", "Waterloo (demo)"), mood="sad")
+    add(beets_env, ("ABBA", "Waterloo (remix)"))     # No mood: matches nothing on it.
+    assert fdup(beets_env, capsys) == {
+        "Waterloo": {"Waterloo (live) [live]"},
+        "Waterloo (live)": {"Waterloo [live]"},
+    }
+
+
+@pytest.mark.parametrize("field", ["year", "length", "comp", "path"])
+def test_non_text_field_is_an_error(beets_env, capsys, field):
+    beets_env.config["fdup"]["fields"].set(["artist", "title", field])
+    with pytest.raises(UserError, match=f"{field} isn't a text field"):
+        run(beets_env, capsys)
+
+
 def test_group_results(beets_env, capsys):
     add(beets_env, ("ABBA", "Waterloo"), ("ABBA", "Waterloo (live)"), ("ABBA", "Waterloo - Remastered"),
         ("The Beatles", "Hey Jude"), ("The Beatles", "Hey Jude (live)"), ("The Beatles", "Let It Be"))

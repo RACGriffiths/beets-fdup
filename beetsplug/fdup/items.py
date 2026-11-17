@@ -1,8 +1,9 @@
 """Fetching just the fields fdup needs from the library, and formatting them for output.
 
 This reads the database more directly than lib.items() does, which makes it much faster on large libraries, but it
-relies on some beets internals (Item._fields, Item._awaken, Item.relation_join, Template.expr, ...). If a beets
-upgrade breaks fdup, look here first; tests/test_items.py compares the results against lib.items()."""
+relies on some beets internals (Item._fields, Item._awaken, Item.relation_join, Template.expr,
+DefaultTemplateFunctions, ...). If a beets upgrade breaks fdup, look here first; tests/test_items.py compares the
+results against lib.items()."""
 
 import collections
 import functools
@@ -28,8 +29,9 @@ def _template(fmt: str) -> Template:
 @functools.cache
 def _template_functions() -> dict[str, Callable[..., str]]:
     """beets' template functions (%upper{}, %if{}, ...) and plugins' ones, for formatting MinItems. Without the whole
-    item and the library, %aunique{} and %sunique{} give '', and %ifdef{} is left out (so it's printed as is)."""
-    functions = DefaultTemplateFunctions().functions()
+    item and the library, %aunique{} and %sunique{} give '', and %ifdef{} is left out (so it's printed as is).
+    (item and lib are passed as None explicitly: they're optional before beets 2.14, required since.)"""
+    functions = DefaultTemplateFunctions(None, None).functions()
     functions.pop("ifdef", None)
     functions.update(plugins.template_funcs())
     return functions
