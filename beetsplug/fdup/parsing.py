@@ -8,7 +8,27 @@ from unidecode import unidecode
 
 _WORD = re.compile(r"[a-z0-9]+")
 _PLACEHOLDER = re.compile(r"\0(\d+)\0")
-_ROMAN_NUMERALS = frozenset("ii iii iv v vi vii viii ix x xi xii xiii xiv xv xvi xvii xviii xix xx".split())
+# Roman numerals counted as numbers, as digits. (A lone 'i' only counts as the last word, see _numbers.)
+_ROMAN_NUMERALS = {w: str(n) for n, w in enumerate(
+    "i ii iii iv v vi vii viii ix x xi xii xiii xiv xv xvi xvii xviii xix xx".split(), 1)}
+# Number words, with their values. They only count as part numbers after one of _PART_WORDS: elsewhere they're
+# usually just words ('one love', 'no one', 'take five', 'cloud number nine').
+_UNITS = "one two three four five six seven eight nine".split()
+_TEENS = "ten eleven twelve thirteen fourteen fifteen sixteen seventeen eighteen nineteen".split()
+_TENS = "twenty thirty forty fifty sixty seventy eighty ninety".split()
+_NUMBER_WORDS = {w: n for n, w in enumerate(_UNITS + _TEENS, 1)} | {w: 10 * n for n, w in enumerate(_TENS, 2)}
+_PART_WORDS = "part parts pt pts movement movements mvt chapter chapters act acts book episode vol vols volume volumes"
+
+
+def _alternatives(words: list[str]) -> str:
+    return "|".join(sorted(words, key=len, reverse=True))    # Longest first, so e.g. 'seventeen' isn't cut short.
+
+
+_SPELLED_NUMBER = re.compile(rf"\b(?:(?:{_alternatives(_TENS)})(?: (?:{_alternatives(_UNITS)}))?"
+                             rf"|{_alternatives(_UNITS + _TEENS)})\b")
+# E.g. 'part two', 'parts one and two', 'chapter twenty one', in a value's words joined by single spaces.
+_SPELLED_PART_NUMBERS = re.compile(
+    rf"\b(?:{_alternatives(_PART_WORDS.split())}) ({_SPELLED_NUMBER.pattern}(?: and {_SPELLED_NUMBER.pattern})*)")
 # Unicode categories of characters with no look of their own, left out when spelling out symbols: combining marks,
 # variation selectors (e.g. the one in '❤️') and joiners (e.g. inside '👨‍👩‍👧').
 _INVISIBLE = frozenset({"Mn", "Me", "Cf"})
@@ -33,12 +53,17 @@ def _transliterate(text: str) -> str:
 
 
 def _numbers(text: str) -> set[str]:
-    """Part/movement numbers in a text, e.g. 'part 2' -> {'2'}, 'synchronicity ii' -> {'ii'}.
+    """Part/movement numbers in a text, as digits: any number in digits or Roman numerals, and number words after a
+    word such as 'part', e.g. 'part 2', 'synchronicity ii' and 'part two' all give {'2'}.
     A lone 'i' only counts as the last word (elsewhere it's usually the pronoun)."""
     words = _WORD.findall(text)
-    numbers = {w for w in words if w.isdigit() or w in _ROMAN_NUMERALS}
+    numbers = {w if w.isdigit() else _ROMAN_NUMERALS[w] for w in words
+               if w.isdigit() or (w in _ROMAN_NUMERALS and w != "i")}
     if len(words) > 1 and words[-1] == "i":
-        numbers.add("i")
+        numbers.add("1")
+    for m in _SPELLED_PART_NUMBERS.finditer(" ".join(words)):
+        numbers.update(str(sum(_NUMBER_WORDS[w] for w in spelled.split()))
+                       for spelled in _SPELLED_NUMBER.findall(m.group(1)))
     return numbers
 
 

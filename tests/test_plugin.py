@@ -150,24 +150,26 @@ def test_group_results_setting_and_options(beets_env, capsys, setting, args, gro
     add(beets_env, ("ABBA", "Waterloo"), ("ABBA", "Waterloo (live)"))
     if setting is not None:
         beets_env.config["fdup"]["group_results"].set(setting)
-    expected = ({"┌── Waterloo\n└── Waterloo (live)"} if grouped
+    # (Within a group, tracks are sorted by path: '01 Waterloo (live).mp3' comes before '01 Waterloo.mp3'.)
+    expected = ({"┌── Waterloo (live)\n└── Waterloo"} if grouped
                 else {"Waterloo\n└─ Waterloo (live)", "Waterloo (live)\n└─ Waterloo"})
     assert blocks(run(beets_env, capsys, *args, "-f", "$title")) == expected
 
 
 def test_matches_layout(beets_env, capsys):
-    # The default prefixes: each block is a tree, with the matches best first (exact title matches before fuzzy ones).
+    # The default prefixes: each block is a tree, with the matches best first (exact title matches before fuzzy ones),
+    # then by path.
     add(beets_env, ("ABBA", "Waterloo"), ("ABBA", "Waterloo (live)"), ("ABBA", "Waterlooo"))
     assert blocks(run(beets_env, capsys, "--by-track", "-f", "$title$fdup_labels")) == {
         "Waterloo\n├─ Waterloo (live) [live]\n└─ Waterlooo",
         "Waterloo (live) [live]\n├─ Waterloo\n└─ Waterlooo",
-        "Waterlooo\n├─ Waterloo\n└─ Waterloo (live) [live]",
+        "Waterlooo\n├─ Waterloo (live) [live]\n└─ Waterloo",
     }
 
 
 def test_groups_layout(beets_env, capsys):
-    # The default prefixes and markers: tracks from the first query only, then both, then the second only; each in the
-    # order they joined the group (the best match first).
+    # The default prefixes and markers: tracks from the first query only, then both, then the second only; each sorted
+    # by path.
     add(beets_env, ("ABBA", "Waterloo"), year=1974)
     add(beets_env, ("ABBA", "Waterlooo (live)"), year=1979)
     add(beets_env, ("ABBA", "Waterloo - 2001 Remaster"), year=2001)
@@ -203,15 +205,99 @@ def test_format_can_use_any_item_field(beets_env, capsys):
 def test_each_mode_can_override_the_format(beets_env, capsys):
     add(beets_env, ("ABBA", "Waterloo"), ("ABBA", "Waterloo (live)"))
     beets_env.config["fdup"]["output"].set({"format": "$title", "groups": {"format": "$artist: $title"}})
-    assert blocks(run(beets_env, capsys)) == {"┌── ABBA: Waterloo\n└── ABBA: Waterloo (live)"}
+    assert blocks(run(beets_env, capsys)) == {"┌── ABBA: Waterloo (live)\n└── ABBA: Waterloo"}
     assert blocks(run(beets_env, capsys, "--by-track")) == {
         "Waterloo\n└─ Waterloo (live)", "Waterloo (live)\n└─ Waterloo"}
     # The --format option overrides both.
-    assert blocks(run(beets_env, capsys, "--group-results", "-f", "$title")) == {"┌── Waterloo\n└── Waterloo (live)"}
+    assert blocks(run(beets_env, capsys, "--group-results", "-f", "$title")) == {"┌── Waterloo (live)\n└── Waterloo"}
 
 
 @pytest.mark.parametrize("key", ["src_fmt", "dup_fmt", "separator"])
 def test_replaced_output_settings_are_an_error(beets_env, capsys, key):
     beets_env.config["fdup"]["output"][key].set("x")
     with pytest.raises(UserError, match=f"output.{key}"):
+        run(beets_env, capsys)
+
+
+def ordered_blocks(output: str) -> list[list[str]]:
+    """The blocks printed (separated by blank lines), in order, as lists of lines."""
+    return [block.splitlines() for block in output.split("\n\n") if block]
+
+
+def add_sort_fixture(env):
+    """Groups of 3, 2, 2 and 2 tracks; The Beatles have an artist_sort, so they sort as 'Beatles, The'."""
+    add(env, ("Queen", "Bohemian Rhapsody"), year=1975)
+    add(env, ("Queen", "Bohemian Rhapsody (live)"), year=1986)
+    add(env, ("The Beatles", "Hey Jude"), year=1968, artist_sort="Beatles, The")
+    add(env, ("The Beatles", "Hey Jude (live)"), year=1970, artist_sort="Beatles, The")
+    add(env, ("ABBA", "Waterloo"), year=1974)
+    add(env, ("ABBA", "Waterloo (live)"), year=1979)
+    add(env, ("Blondie", "Atomic"), year=1980)
+    add(env, ("Blondie", "Atomic - Remastered"), year=2001)
+    add(env, ("Blondie", "Atomic (live)"), year=1999)
+
+
+def test_groups_are_sorted_by_size_then_artist_and_title(beets_env, capsys):
+    add_sort_fixture(beets_env)
+    output = run(beets_env, capsys, "-f", "$artist: $title")
+    assert ordered_blocks(output) == [
+        # Within each group, by path ('01 Atomic (live).mp3', '01 Atomic - Remastered.mp3', '01 Atomic.mp3').
+        ["┌── Blondie: Atomic (live)", "├── Blondie: Atomic - Remastered", "└── Blondie: Atomic"],
+        ["┌── ABBA: Waterloo (live)", "└── ABBA: Waterloo"],
+        ["┌── The Beatles: Hey Jude (live)", "└── The Beatles: Hey Jude"],
+        ["┌── Queen: Bohemian Rhapsody (live)", "└── Queen: Bohemian Rhapsody"],
+    ]
+
+
+def test_by_track_is_sorted_by_artist_and_title(beets_env, capsys):
+    add_sort_fixture(beets_env)
+    output = run(beets_env, capsys, "--by-track", "-f", "$title $fdup_score")
+    assert [block[0] for block in ordered_blocks(output)] == [
+        "Waterloo ", "Waterloo (live) ", "Hey Jude ", "Hey Jude (live) ", "Atomic ", "Atomic (live) ",
+        "Atomic - Remastered ", "Bohemian Rhapsody ", "Bohemian Rhapsody (live) "]
+
+
+def test_sort_settings(beets_env, capsys):
+    add_sort_fixture(beets_env)
+    beets_env.config["fdup"]["output"]["groups"].set({"sort": "fdup_size+ title-", "sort_tracks": "year-"})
+    output = run(beets_env, capsys, "-f", "$title $year")
+    assert ordered_blocks(output) == [
+        ["┌── Waterloo (live) 1979", "└── Waterloo 1974"],
+        ["┌── Hey Jude (live) 1970", "└── Hey Jude 1968"],
+        ["┌── Bohemian Rhapsody (live) 1986", "└── Bohemian Rhapsody 1975"],
+        ["┌── Atomic - Remastered 2001", "├── Atomic (live) 1999", "└── Atomic 1980"],
+    ]
+
+
+def test_empty_sort_settings_leave_the_order_unsorted(beets_env, capsys):
+    # The groups in the order they were made, the best match first: here the remaster, an exact title match.
+    add(beets_env, ("ABBA", "Waterloo"), ("ABBA", "Waterloo - Remastered"), ("ABBA", "Waterlooo"))
+    beets_env.config["fdup"]["output"]["groups"].set({"sort": "", "sort_tracks": None})
+    output = run(beets_env, capsys, "-f", "$title")
+    assert ordered_blocks(output) == [["┌── Waterloo", "├── Waterloo - Remastered", "└── Waterlooo"]]
+
+
+def test_sort_by_score(beets_env, capsys):
+    # A group's score is its weakest: the fuzzy match comes first, sorting by score ascending.
+    add(beets_env, ("ABBA", "Waterloo"), ("ABBA", "Waterlooo"), ("Queen", "Bohemian Rhapsody"),
+        ("Queen", "Bohemian Rhapsody"))
+    beets_env.config["fdup"]["output"]["groups"]["sort"].set("fdup_score+")
+    output = run(beets_env, capsys, "-f", "$title")
+    assert [block[0] for block in ordered_blocks(output)] == ["┌── Waterloo", "┌── Bohemian Rhapsody"]
+
+
+def test_a_sort_in_the_query_orders_the_blocks(beets_env, capsys):
+    # As in `beet ls`, 'year-' sorts rather than filters: every track is still compared. It replaces the sort setting
+    # (so not by size first), and sorts by each group's first track (within a group, they're still sorted by path).
+    add_sort_fixture(beets_env)
+    output = run(beets_env, capsys, "-f", "$title $year", "year-")
+    assert [block[0] for block in ordered_blocks(output)] == [
+        "┌── Atomic (live) 1999", "┌── Bohemian Rhapsody (live) 1986", "┌── Waterloo (live) 1979",
+        "┌── Hey Jude (live) 1970"]
+
+
+@pytest.mark.parametrize(("setting", "value"), [("sort", "artist"), ("sort_tracks", "filesize+")])
+def test_bad_sort_setting_is_an_error(beets_env, capsys, setting, value):
+    beets_env.config["fdup"]["output"]["groups"][setting].set(value)
+    with pytest.raises(UserError, match=f"output.groups.{setting}"):
         run(beets_env, capsys)

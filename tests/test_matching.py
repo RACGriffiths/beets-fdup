@@ -92,6 +92,35 @@ class TestMatching:
                               ("Muse", "Exogenesis: Symphony, Part 3: Redemption")])
         assert matches == {}
 
+    def test_part_numbers_in_words(self):
+        matches = matches_of([("Diddy", "I Need a Girl, Part One"), ("Diddy", "I Need a Girl, Part Two"),
+                              ("Diddy", "I Need a Girl, Part 1"), ("Diddy", "I Need a Girl (Part 2)")])
+        assert matched(matches, "I Need a Girl, Part One", "I Need a Girl, Part 1")
+        assert matched(matches, "I Need a Girl, Part Two", "I Need a Girl (Part 2)")
+        assert not matched(matches, "I Need a Girl, Part One", "I Need a Girl, Part Two")
+        assert not matched(matches, "I Need a Girl, Part One", "I Need a Girl (Part 2)")
+        assert len(matches) == 4
+
+    def test_part_numbers_in_roman_numerals(self):
+        matches = matches_of([("Destiny's Child", "Independent Women, Part I"),
+                              ("Destiny's Child", "Independent Women, Part 1"),
+                              ("Destiny's Child", "Independent Women, Part Two"),
+                              ("Destiny's Child", "Independent Women, Part II")])
+        assert matched(matches, "Independent Women, Part I", "Independent Women, Part 1")
+        assert matched(matches, "Independent Women, Part Two", "Independent Women, Part II")
+        assert not matched(matches, "Independent Women, Part I", "Independent Women, Part II")
+        assert len(matches) == 4
+
+    def test_number_words_outside_part_numbers_still_match(self):
+        # Number words only count as part numbers after a word such as 'part'. Elsewhere they're just words: counting
+        # them would give e.g. 'three lions' {3} vs "three lions '98" {3, 98}, which wouldn't match.
+        matches = matches_of([("Queen", "One Vision"), ("Queen", "One Vision (2011 remaster)"),
+                              ("Alicia Keys", "No One"), ("Alicia Keys", "No One (live)"),
+                              ("Lightning Seeds", "Three Lions"), ("Lightning Seeds", "Three Lions '98")])
+        assert matched(matches, "One Vision", "One Vision (2011 remaster)")
+        assert matched(matches, "No One", "No One (live)")
+        assert matched(matches, "Three Lions", "Three Lions '98")
+
     def test_different_subtitles(self):
         matches = matches_of([("D'Oyly Carte", "The Gondoliers: Take a Pair of Sparkling Eyes"),
                               ("D'Oyly Carte", "The Gondoliers: In Enterprise of Martial Kind")])

@@ -56,8 +56,21 @@ class TestValueParser:
 
     def test_trailing_roman_i_is_a_number(self):
         parser = ValueParser([], DEFAULT_QUALIFIERS)
-        assert parser.parse("synchronicity i").numbers == {"i"}
+        assert parser.parse("synchronicity i").numbers == {"1"}
         assert parser.parse("i want you").numbers == set()
+
+    def test_numbers_are_digits(self):
+        parser = ValueParser([], DEFAULT_QUALIFIERS)
+        for value in ["song, part 2", "song, part ii", "song, part two", "song (pt. two)", "song: movement two"]:
+            assert parser.parse(value).numbers == {"2"}, value
+        assert parser.parse("song, parts one and two").numbers == {"1", "2"}
+        assert parser.parse("song, chapter twenty one").numbers == {"21"}
+        assert parser.parse("song, chapter seventeen").numbers == {"17"}
+
+    def test_number_words_only_count_after_a_part_word(self):
+        parser = ValueParser([], DEFAULT_QUALIFIERS)
+        for value in ["one love", "the one", "no one", "take five", "love potion number nine", "part oneself"]:
+            assert parser.parse(value).numbers == set(), value
 
     def test_nothing_outside_brackets(self):
         parsed = ValueParser([], DEFAULT_QUALIFIERS).parse("(untitled)")

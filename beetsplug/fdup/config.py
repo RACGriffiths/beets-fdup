@@ -11,6 +11,7 @@ from .fingerprint import TextPreprocessor, compare_fps
 from .matching import FieldMatcher
 from .output import MARKER_SUBSETS, POSITIONS, OutputFormat
 from .parsing import ValueParser
+from .sorting import parse_sort
 
 # How titles are split into a core and qualifiers (see ValueParser). Also the fallback for any key missing from a
 # field's own 'qualifiers' config.
@@ -82,11 +83,17 @@ DEFAULT_CONFIG: dict[str, Any] = {
             # (with --against-all, the rest of the library).
             "marker": {"query1": "◂ ", "both": "─ ", "query2": "▸ "},
             "separator": "\n",  # printed between blocks ("\n": a blank line)
+            # Sorts, in beets' syntax (see sorting.py): the groups (by size, then by their first item), and the
+            # items within each group (after the query order the markers show).
+            "sort": "fdup_size- artist+ title+",
+            "sort_tracks": "path+",
         },
         # --by-track: each item, then its matches.
         "by_track": {
             "prefix": {"first": "", "middle": "├─ ", "last": "└─ "},
             "separator": "\n",
+            "sort": "artist+ title+ path+",         # the items
+            "sort_tracks": "fdup_score- path+",     # each item's matches
         },
     },
 }
@@ -130,12 +137,15 @@ def build_output_format(config: confuse.ConfigView, grouped: bool, format_overri
     for key, replacement in _REPLACED_OUTPUT_KEYS.items():
         if output[key].exists():
             raise UserError(f"fdup: the output.{key} setting has been replaced by {replacement} (see the README)")
-    mode = output["groups" if grouped else "by_track"]
+    mode_name = "groups" if grouped else "by_track"
+    mode = output[mode_name]
     return OutputFormat(
         format=format_override or mode["format"].get(confuse.Optional(str)) or output["format"].get(str),
         prefix={position: mode["prefix"][position].get(str) for position in POSITIONS},
         separator=mode["separator"].get(str),
         marker={abc: mode["marker"][name].get(str) for name, abc in MARKER_SUBSETS.items()} if grouped else {},
+        sort=parse_sort(mode["sort"].get(), f"output.{mode_name}.sort"),
+        sort_tracks=parse_sort(mode["sort_tracks"].get(), f"output.{mode_name}.sort_tracks"),
     )
 
 

@@ -7,9 +7,11 @@ How it fits together:
   fingerprint.py  n-gram fingerprints, compared in bulk with numpy
   matching.py     per-field fuzzy matching, combined into item matches
   grouping.py     grouping matches (the default output, unless --by-track)
-  output.py       printing matches and groups, with their prefixes
+  sorting.py      sort terms (beets' syntax), and sorting the output by them
+  output.py       printing matches and groups, sorted, with their prefixes
 """
 
+import dataclasses
 import functools
 from optparse import Values
 
@@ -22,6 +24,7 @@ from .grouping import group_matches
 from .items import MinItem, fetch_items, template_fields
 from .matching import FieldMatcher, find_matches, index_items, version_labels
 from .output import print_groups, print_matches
+from .sorting import query_sort, sort_fields
 
 
 class FDupPlugin(BeetsPlugin):
@@ -76,9 +79,13 @@ class FDupPlugin(BeetsPlugin):
         self._log.debug("matching on fields: {}", ", ".join(field.name for field in fields))
         grouped = self.config["group_results"].get(bool)
         output_format = build_output_format(self.config, grouped, opts.format)
+        if sort := query_sort(args):    # A sort in the query (e.g. 'year+') orders the blocks, as in `beet ls`.
+            output_format = dataclasses.replace(output_format, sort=sort)
 
-        # Fetch minimal information about the items for both sets 1 and 2.
-        item_by_id, set1, set2 = self._fetch_items(lib, opts, args, fields, template_fields(output_format.format))
+        # Fetch minimal information about the items for both sets 1 and 2: the fields matched on, printed and sorted by.
+        output_fields = template_fields(output_format.format) | sort_fields(
+            output_format.sort + output_format.sort_tracks)
+        item_by_id, set1, set2 = self._fetch_items(lib, opts, args, fields, output_fields)
 
         # Normalise, parse and fingerprint each distinct value of each field once, up front.
         self._log.debug("fingerprinting...")
@@ -104,7 +111,7 @@ class FDupPlugin(BeetsPlugin):
         args1, args2 = self._split_query_args(args, opts.against_all)
         duplicate_sets: bool = args1 == args2
 
-        # Fetch minimal information about the items for both sets A and B: the fields matched on, and those printed.
+        # Fetch minimal information about the items for both sets A and B: the fields matched on, and output_fields.
         needed = output_fields | {field.name for field in fields} | {
             field.exact_key for field in fields if field.exact_key}
         items1 = fetch_items(lib, needed, args1)

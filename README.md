@@ -42,17 +42,19 @@ beet fdup year:..1980 ~~~ year:1981..       # duplicates of pre-1981 tracks amon
 beet fdup --by-track                        # each track, followed by its duplicates, instead of groups
 beet fdup --match-threshold 0.9             # stricter matching (1.0 = perfect match)
 beet fdup -f '$album: $title'               # print each track with this format (also --format)
+beet fdup artist:queen year-                # sorted by year, newest first, instead of the configured sort
 ```
 
 Queries use the normal [beets query syntax](https://beets.readthedocs.io/en/stable/reference/query.html). With one
 query, tracks are only compared with other tracks matching it, unless you add `--against-all`. With two queries
 separated by `~~~`, tracks matching the first are compared with tracks matching the second.
 
-Output lists groups of tracks that all match each other, largest first, with any version labels:
+Output lists groups of tracks that all match each other, largest first and then by artist and title, with any version
+labels. Within each group, tracks are sorted by path (see [Sorting](#sorting)):
 
 ```
-┌── Queen - One Vision (4:02) - /music/Queen/Greatest Hits II/09 One Vision.mp3
-├── Queen - One Vision (5:11) - /music/Queen/A Kind of Magic/01 One Vision.mp3
+┌── Queen - One Vision (5:11) - /music/Queen/A Kind of Magic/01 One Vision.mp3
+├── Queen - One Vision (4:02) - /music/Queen/Greatest Hits II/09 One Vision.mp3
 └── Queen - One Vision (Extended Version) (6:26) [extended] - /music/Queen/Singles/12 One Vision.mp3
 ```
 
@@ -65,8 +67,8 @@ Each track is marked by which query it came from: `◂` the first query only, `�
 └─▸ Johnny Cash - I Walk the Line (live) (2:57) [live] - /music/Johnny Cash/At San Quentin/03 I Walk the Line.mp3
 ```
 
-With `--by-track`, each track is listed instead, followed by its duplicates (best match first). With one query, each
-pair of duplicates appears twice, once under each track:
+With `--by-track`, each track is listed instead (by artist and title), followed by its duplicates (best match first).
+With one query, each pair of duplicates appears twice, once under each track:
 
 ```
 Queen - One Vision (4:02) - /music/Queen/Greatest Hits II/09 One Vision.mp3
@@ -119,6 +121,8 @@ fdup:
         both: "─ "
         query2: "▸ "          # the second query only (with --against-all, the rest of the library)
       separator: "\n"         # printed between blocks ("\n": a blank line)
+      sort: fdup_size- artist+ title+   # the groups: largest first, then by their first track (see Sorting)
+      sort_tracks: path+      # the tracks in each group, after the query order the markers show
     by_track:                 # with --by-track: each track, then its duplicates
       # format: ...
       prefix:
@@ -126,6 +130,8 @@ fdup:
         middle: "├─ "         # its duplicates...
         last: "└─ "           # ...and the last one
       separator: "\n"
+      sort: artist+ title+ path+        # the tracks
+      sort_tracks: fdup_score- path+    # each track's duplicates: best match first
 ```
 
 Each line is the prefix (and in groups, the marker), then the track, formatted as a
@@ -140,6 +146,26 @@ Each line is the prefix (and in groups, the marker), then the track, formatted a
 
 Computed fields such as `$filesize` aren't available, and nor are `%aunique{}`, `%sunique{}` and `%ifdef{}`, which need
 the whole item or the library. If your terminal can't show the tree characters, use ASCII ones, e.g. `|- ` and `` `- ``.
+
+### Sorting
+
+Each mode has two sorts, in beets'
+[sort syntax](https://beets.readthedocs.io/en/stable/reference/query.html#sort-order): fields, each followed by `+`
+(ascending) or `-` (descending), with each field breaking ties in the ones before it.
+
+- `sort` orders the blocks (groups, or tracks with their duplicates). A field sorts by the block's first line, except
+  `fdup_size`, the number of tracks in the block, and `fdup_score`, its lowest score.
+- `sort_tracks` orders the tracks within each block. In groups, tracks stay in query order (`◂`, then `─`, then `▸`)
+  and are sorted within that; with `--by-track`, only the duplicates are sorted, under their track.
+
+Any item field can be used, flexible attributes included, as can `fdup_score` and fdup's other `$fdup_*` values. As in
+beets, `artist` and `albumartist` sort by `artist_sort` and `albumartist_sort` where those are set, text sorts
+case-insensitively (unless beets' `sort_case_insensitive` is off), and a missing value sorts lowest. Computed fields
+such as `filesize` can't be used. An empty sort leaves that order unsorted: groups in the order they were made (each
+from the best match left), tracks in a group in the order they joined it, and with `--by-track`, by id.
+
+A sort in the query replaces `sort` for that run, as in `beet ls`: `beet fdup artist:queen year-` lists the groups by
+the year of their first track, newest first.
 
 ### Qualifiers
 
@@ -163,6 +189,12 @@ qualifiers:
   check_numbers: yes          # different part/movement numbers (part 2 vs part 3) mean different tracks
   match_versions: yes         # match different versions (live vs studio, ...); no: only the same version
 ```
+
+`check_numbers` compares the numbers in the core and subtitles, as digits: any number in digits or Roman numerals (a
+lone `I` only as the last word, since elsewhere it's usually the pronoun), and number words after a word such as
+`part`, `pt`, `movement`, `chapter`, `act`, `book`, `episode` or `vol`. So `Part Two`, `Part II` and `Part 2` are the
+same number, and `Part One` vs `Part Two` don't match. Other number words are just words (`One Love`, `No One`,
+`Take Five`).
 
 For example, to stop reporting live versions and remixes as duplicates of the studio track, and treat `(cover)` as a
 version marker:
@@ -209,7 +241,8 @@ Layout:
 | `beetsplug/fdup/fingerprint.py` | n-gram fingerprints, bulk comparison with numpy |
 | `beetsplug/fdup/matching.py` | per-field fuzzy matching, combined into item matches |
 | `beetsplug/fdup/grouping.py` | grouping matches into groups that all match each other (the default output) |
-| `beetsplug/fdup/output.py` | printing matches and groups, with their prefixes |
+| `beetsplug/fdup/sorting.py` | sort terms (beets' syntax), and sorting the output by them |
+| `beetsplug/fdup/output.py` | printing matches and groups, sorted, with their prefixes |
 | `tests/` | pytest tests; `test_plugin.py` runs `beet fdup` end to end on a temporary library |
 | `scripts/profile_fdup.py` | profile a `beet fdup` run with cProfile (or see its docstring for line_profiler) |
 
