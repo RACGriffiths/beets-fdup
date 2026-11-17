@@ -41,21 +41,29 @@ beet fdup --against-all album:greatest      # tracks on 'greatest...' albums wit
 beet fdup year:..1980 ~~~ year:1981..       # duplicates of pre-1981 tracks among later ones
 beet fdup --group-results                   # groups of tracks that all match each other
 beet fdup --match-threshold 0.9             # stricter matching (1.0 = perfect match)
+beet fdup -f '$album: $title'               # print each track with this format (also --format)
 ```
 
 Queries use the normal [beets query syntax](https://beets.readthedocs.io/en/stable/reference/query.html). With one
 query, tracks are only compared with other tracks matching it, unless you add `--against-all`. With two queries
 separated by `~~~`, tracks matching the first are compared with tracks matching the second.
 
-Output lists each track, followed by its duplicates, with any version labels that differ between them:
+Output lists each track, followed by its duplicates (best match first), with any version labels:
 
 ```
-*** The Beatles - Hey Jude (7:11) - /music/The Beatles/Hey Jude/01 Hey Jude.mp3
- |_ Beatles - Hey Jude (Remastered 2009) (7:08) [remaster] - /music/Beatles/1/21 Hey Jude.mp3
+Queen - One Vision (4:02) - /music/Queen/Greatest Hits II/09 One Vision.mp3
+├─ Queen - One Vision (5:11) - /music/Queen/A Kind of Magic/01 One Vision.mp3
+└─ Queen - One Vision (Extended Version) (6:26) [extended] - /music/Queen/Singles/12 One Vision.mp3
 ```
 
-With `--group-results`, each group is printed together, each track marked by which query it came from: `--<` the
-first query only, `---` both, `-->` the second query only.
+With `--group-results`, each group is printed together, each track marked by which query it came from: `◂` the
+first query only, `▸` the second query only (with `--against-all`, the rest of the library), `─` both:
+
+```
+┌─◂ Johnny Cash - I Walk the Line (2:41) - /music/Charts/Billboard Hot 100 - 1956/81 I Walk the Line.mp3
+├─▸ Johnny Cash - I Walk the Line (2:42) - /music/Johnny Cash/At His Best/03 I Walk the Line.mp3
+└─▸ Johnny Cash - I Walk the Line (live) (2:57) [live] - /music/Johnny Cash/At San Quentin/03 I Walk the Line.mp3
+```
 
 ## Configuration
 
@@ -88,15 +96,39 @@ fdup:
       qualifiers: { ... }     # the defaults below
 
   output:
-    separator: "\n"
-    src_fmt: "*** $artist - $title ($length) - $path\n"
-    dup_fmt: " |_ $artist - $title ($length)$fdup_versions - $path\n"
+    format: "$artist - $title ($length)$fdup_labels - $path"   # each track (as -f/--format), after its prefix
+    matches:                  # each track, then its duplicates
+      # format: ...           # overrides output.format for this mode
+      prefix:                 # by the line's position in the block
+        first: ""             # the track
+        middle: "├─ "         # its duplicates...
+        last: "└─ "           # ...and the last one
+      separator: "\n"         # printed between blocks ("\n": a blank line)
+    groups:                   # with --group-results
+      # format: ...
+      prefix:
+        first: "┌─"
+        middle: "├─"
+        last: "└─"
+      marker:                 # after the prefix: which query the track came from
+        query1: "◂ "          # the first query only
+        both: "─ "
+        query2: "▸ "          # the second query only (with --against-all, the rest of the library)
+      separator: "\n"
 ```
 
-The output formats are [beets path formats](https://beets.readthedocs.io/en/stable/reference/pathformat.html). They
-can use `$fdup_score` (the match score) and `$fdup_versions` (the differing version labels), plus `$id`, `$path`,
-`$artist`, `$title`, `$length` and the fields being matched: fdup only reads those fields from the library, so others
-(e.g. `$album`) aren't available.
+Each line is the prefix (and in groups, the marker), then the track, formatted as a
+[beets template](https://beets.readthedocs.io/en/stable/reference/pathformat.html). It can use any item field
+(`$album`, `$year`, flexible attributes, ...), template functions such as `%upper{}` and `%if{}`, and fdup's own:
+
+- `$fdup_labels`: the track's version labels, e.g. ` [live, remaster]` (with a leading space, or empty if none).
+- `$fdup_score`: in the default mode, a duplicate's match score with the track above it (empty on the track's own
+  line); in groups, the track's weakest match with the others in its group (that it was compared with).
+- `$fdup_versions`: in the default mode, the version labels that differ between a duplicate and the track above it,
+  in the same form as `$fdup_labels` (empty on the track's own line, and in groups).
+
+Computed fields such as `$filesize` aren't available, and nor are `%aunique{}`, `%sunique{}` and `%ifdef{}`, which need
+the whole item or the library. If your terminal can't show the tree characters, use ASCII ones, e.g. `|- ` and `` `- ``.
 
 ### Qualifiers
 
@@ -158,13 +190,13 @@ Layout:
 | Path | What's there |
 |---|---|
 | `beetsplug/fdup/__init__.py` | the plugin: the `fdup` command and its options |
-| `beetsplug/fdup/config.py` | default config, building a `FieldMatcher` per field |
-| `beetsplug/fdup/items.py` | fast fetching of just the needed fields (uses some beets internals) |
+| `beetsplug/fdup/config.py` | default config, building a `FieldMatcher` per field and the output settings |
+| `beetsplug/fdup/items.py` | fast fetching of just the needed fields, and formatting them (uses some beets internals) |
 | `beetsplug/fdup/parsing.py` | normalising, splitting values into core / subtitles / labels |
 | `beetsplug/fdup/fingerprint.py` | n-gram fingerprints, bulk comparison with numpy |
 | `beetsplug/fdup/matching.py` | per-field fuzzy matching, combined into item matches |
 | `beetsplug/fdup/grouping.py` | `--group-results` |
-| `beetsplug/fdup/output.py` | printing |
+| `beetsplug/fdup/output.py` | printing matches and groups, with their prefixes |
 | `tests/` | pytest tests; `test_plugin.py` runs `beet fdup` end to end on a temporary library |
 | `scripts/profile_fdup.py` | profile a `beet fdup` run with cProfile (or see its docstring for line_profiler) |
 

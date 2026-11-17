@@ -4,7 +4,7 @@ These guard the parts of fdup that rely on beets internals: if a beets upgrade c
 
 import pytest
 
-from beetsplug.fdup.items import MinItem, fetch_items
+from beetsplug.fdup.items import MinItem, fetch_items, template_fields
 
 FIELDS = {"id", "path", "artist", "title", "length", "year", "mood", "mb_workid"}
 
@@ -47,5 +47,11 @@ def test_paths_are_absolute(env):
 def test_min_item_formats_like_an_item(env):
     item = env.lib.items("title:waterloo").get()
     min_item = MinItem({f: item.get(f) for f in FIELDS})
-    fmt = "$artist - $title ($length) $year $mood $path"
+    fmt = "$artist - $title ($length) $year $mood $path %upper{$title} %if{$mood,[$mood]}"
     assert format(min_item, fmt) == format(item, fmt)
+
+
+def test_template_fields():
+    # Fields in function arguments count; fdup's own values and computed fields (fetch_items can't get those) don't.
+    fmt = "$artist - %if{$album,$album ($year)} %lower{$title}$fdup_labels $fdup_score $filesize"
+    assert template_fields(fmt) == {"artist", "album", "year", "title"}

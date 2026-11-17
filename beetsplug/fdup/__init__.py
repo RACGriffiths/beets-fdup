@@ -1,29 +1,27 @@
 """fdup: a beets plugin that finds duplicate tracks by fuzzy matching fields such as artist and title.
 
 How it fits together:
-  config.py       defaults, and a FieldMatcher for each configured field
+  config.py       defaults, a FieldMatcher for each configured field, and the output settings
   items.py        fetching just the needed fields from the library (fast), and formatting them
   parsing.py      normalising values, and splitting titles into a core, subtitles and version labels
   fingerprint.py  n-gram fingerprints, compared in bulk with numpy
   matching.py     per-field fuzzy matching, combined into item matches
   grouping.py     grouping matches (--group-results)
-  output.py       printing
+  output.py       printing matches and groups, with their prefixes
 """
 
+import functools
 from optparse import Values
 
 from beets.library import Library
 from beets.plugins import BeetsPlugin
 from beets.ui import Subcommand, UserError
 
-from .config import DEFAULT_CONFIG, build_field_matchers
+from .config import DEFAULT_CONFIG, build_field_matchers, build_output_format
 from .grouping import group_matches
-from .items import MinItem, fetch_items
-from .matching import FieldMatcher, find_matches, index_items
+from .items import MinItem, fetch_items, template_fields
+from .matching import FieldMatcher, find_matches, index_items, version_labels
 from .output import print_groups, print_matches
-
-# Fields fetched for every item, for the default output formats.
-_OUTPUT_FIELDS = {"id", "path", "artist", "title", "length"}
 
 
 class FDupPlugin(BeetsPlugin):
@@ -54,6 +52,11 @@ class FDupPlugin(BeetsPlugin):
             action="store_true",
             help="Group the results",
         )
+        command.parser.add_option(
+            "-f", "--format",
+            dest="format",
+            help="Print each track with this format (a beets template), instead of the configured output format",
+        )
         command.func = self._fdup
         return [command]
 
@@ -63,9 +66,11 @@ class FDupPlugin(BeetsPlugin):
         self.config.set_args(opts)
         fields = build_field_matchers(self.config, getattr(opts, "match_threshold", None))
         self._log.debug("matching on fields: {}", ", ".join(field.name for field in fields))
+        grouped = self.config["group_results"].get(bool)
+        output_format = build_output_format(self.config, grouped, opts.format)
 
         # Fetch minimal information about the items for both sets 1 and 2.
-        item_by_id, set1, set2 = self._fetch_items(lib, opts, args, fields)
+        item_by_id, set1, set2 = self._fetch_items(lib, opts, args, fields, template_fields(output_format.format))
 
         # Normalise, parse and fingerprint each distinct value of each field once, up front.
         self._log.debug("fingerprinting...")
@@ -74,26 +79,25 @@ class FDupPlugin(BeetsPlugin):
         # Match items 1 against items 2.
         self._log.debug("finding matches...")
         matches = find_matches(fields, set1, set2)
-        if not self.config["group_results"].get(bool):
-            output = self.config["output"]
-            n_matches = print_matches(matches, item_by_id, output["src_fmt"].get(str), output["dup_fmt"].get(str),
-                                      output["separator"].get(str))
+        labels = functools.partial(version_labels, fields)
+        if not grouped:
+            n_matches = print_matches(matches, item_by_id, output_format, labels)
             self._log.info("found {} duplicate pairs", n_matches)
         else:
             groups = group_matches(matches, set1, set2)
-            print_groups(groups, item_by_id)
+            print_groups(groups, item_by_id, output_format, labels)
             self._log.info("found {} groups of duplicates", len(groups))
 
     def _fetch_items(
-            self, lib: Library, opts: Values, args: list[str], fields: list[FieldMatcher],
+            self, lib: Library, opts: Values, args: list[str], fields: list[FieldMatcher], output_fields: set[str],
     ) -> tuple[dict[int, MinItem], set[int], set[int]]:
 
         # Optionally, split the query into 2 queries for subsets 'A' and 'B' if the separator is detected.
         args1, args2 = self._split_query_args(args, opts.against_all)
         duplicate_sets: bool = args1 == args2
 
-        # Fetch minimal information about the items for both sets A and B.
-        needed = _OUTPUT_FIELDS | {field.name for field in fields} | {
+        # Fetch minimal information about the items for both sets A and B: the fields matched on, and those printed.
+        needed = output_fields | {field.name for field in fields} | {
             field.exact_key for field in fields if field.exact_key}
         items1 = fetch_items(lib, needed, args1)
         self._log.debug("items loaded for source set: {} ({})", len(items1), args1 or "all items in library")

@@ -1,4 +1,4 @@
-"""fdup's configuration: the defaults, and building a FieldMatcher for each configured field."""
+"""fdup's configuration: the defaults, building a FieldMatcher for each configured field, and the output settings."""
 
 import functools
 from collections.abc import Callable
@@ -9,6 +9,7 @@ from beets.ui import UserError
 
 from .fingerprint import TextPreprocessor, compare_fps
 from .matching import FieldMatcher
+from .output import MARKER_SUBSETS, POSITIONS, OutputFormat
 from .parsing import ValueParser
 
 # How titles are split into a core and qualifiers (see ValueParser). Also the fallback for any key missing from a
@@ -67,11 +68,30 @@ DEFAULT_CONFIG: dict[str, Any] = {
         },
     },
     "output": {
-        "separator": "\n",
-        "src_fmt": "*** $artist - $title ($length) - $path\n",
-        # Also available here: $fdup_score (overall match score), $fdup_versions (differing version labels).
-        "dup_fmt": " |_ $artist - $title ($length)$fdup_versions - $path\n"
-    }
+        # Each item's line, after its prefix: a beets template, which can also use $fdup_labels, $fdup_score and
+        # $fdup_versions (see the README). Each mode below can set its own 'format', overriding this one.
+        "format": "$artist - $title ($length)$fdup_labels - $path",
+        # The default mode: each item, then its matches.
+        "matches": {
+            "prefix": {"first": "", "middle": "├─ ", "last": "└─ "},  # by the line's position in the block
+            "separator": "\n",  # printed between blocks ("\n": a blank line)
+        },
+        # --group-results: groups of items that all match each other.
+        "groups": {
+            "prefix": {"first": "┌─", "middle": "├─", "last": "└─"},
+            # After the prefix: which query the item came from. The first query only, both, or the second query only
+            # (with --against-all, the rest of the library).
+            "marker": {"query1": "◂ ", "both": "─ ", "query2": "▸ "},
+            "separator": "\n",
+        },
+    },
+}
+
+# Output settings that have been replaced, and by what.
+_REPLACED_OUTPUT_KEYS = {
+    "src_fmt": "output.format and output.matches.prefix",
+    "dup_fmt": "output.format and output.matches.prefix",
+    "separator": "output.matches.separator and output.groups.separator",
 }
 
 
@@ -97,6 +117,22 @@ def build_field_matchers(config: confuse.ConfigView, threshold: float | None = N
             field_config("exact_key").get(),
             qualifiers))
     return fields
+
+
+def build_output_format(config: confuse.ConfigView, grouped: bool, format_override: str | None = None) -> OutputFormat:
+    """The output settings for printing groups or matches. format_override, if given, overrides the configured
+    format (the --format option)."""
+    output = config["output"]
+    for key, replacement in _REPLACED_OUTPUT_KEYS.items():
+        if output[key].exists():
+            raise UserError(f"fdup: the output.{key} setting has been replaced by {replacement} (see the README)")
+    mode = output["groups" if grouped else "matches"]
+    return OutputFormat(
+        format=format_override or mode["format"].get(confuse.Optional(str)) or output["format"].get(str),
+        prefix={position: mode["prefix"][position].get(str) for position in POSITIONS},
+        separator=mode["separator"].get(str),
+        marker={abc: mode["marker"][name].get(str) for name, abc in MARKER_SUBSETS.items()} if grouped else {},
+    )
 
 
 def _field_config(config: confuse.ConfigView, fieldname: str, key: str) -> confuse.ConfigView:

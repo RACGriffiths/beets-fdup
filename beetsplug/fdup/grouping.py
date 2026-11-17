@@ -8,6 +8,7 @@ Items are only compared across the sets, so two 'a' items (or two 'c' items) are
 group therefore needs each member to match every other member it was compared with, rather than every member."""
 
 import collections
+import math
 from collections.abc import Iterable
 
 from .matching import Match
@@ -44,12 +45,20 @@ class Group:
     ids_abc: dict[str, set[int]]      # ids in group indexed by whether in subset a b or c
     valid_abc: dict[str, set[int]]    # ids connected to all ids in each ids_abc
     potentials: dict[int, float]      # ids that could be added along with their minimum weight.
+    order: list[int]                  # ids in the order they joined the group (the best matching pair first)
+    score_by_id: dict[int, float]     # each member's weakest match with the members it was compared with
 
     def __init__(self):
         self.ids = set()
         self.ids_abc = collections.defaultdict(set[int])
         self.valid_abc = collections.defaultdict(set[int])
         self.potentials = collections.defaultdict(float)
+        self.order = []
+        self.score_by_id = {}
+
+    def members(self) -> list[tuple[int, str]]:
+        """Each member's id and subset: those in 'a' first, then 'b', then 'c', each in the order they joined."""
+        return [(id_, abc) for abc in 'abc' for id_ in self.order if id_ in self.ids_abc[abc]]
 
     def _init_conn_abc(self, node: Node, abc: str):
         self.valid_abc[abc] = node.conn_abc[abc].copy()
@@ -69,9 +78,16 @@ class Group:
 
     def add_node(self, node: Node):
 
+        # Update the scores: the new node's weakest match with the members it was compared with, and theirs.
+        weights = [(id_, node.weight_by_id[id_]) for id_ in self.order if id_ in node.weight_by_id]
+        for id_, weight in weights:
+            self.score_by_id[id_] = min(self.score_by_id[id_], weight)
+        self.score_by_id[node.id] = min((weight for _, weight in weights), default=math.inf)
+
         # Add node id:
         self.ids.add(node.id)
         self.ids_abc[node.abc].add(node.id)
+        self.order.append(node.id)
 
         # If new node is 'b' or 'c', update valid 'a' nodes; initialise if this is first 'b' or 'c' node.
         if node.abc != 'a':

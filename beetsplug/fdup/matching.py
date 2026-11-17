@@ -207,6 +207,11 @@ def index_items(fields: list[FieldMatcher], item_by_id: dict[int, MinItem]):
         field.index_items(item_by_id)
 
 
+def version_labels(fields: list[FieldMatcher], id_: int) -> frozenset[str]:
+    """An indexed item's version labels, from all fields, e.g. {'live'} for the title 'song (live)'."""
+    return frozenset().union(*(field.labels(id_) for field in fields))
+
+
 def find_matches(
         fields: list[FieldMatcher],
         set1: set[int],

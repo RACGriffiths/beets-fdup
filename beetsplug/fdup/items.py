@@ -1,19 +1,21 @@
 """Fetching just the fields fdup needs from the library, and formatting them for output.
 
 This reads the database more directly than lib.items() does, which makes it much faster on large libraries, but it
-relies on some beets internals (Item._fields, Item._awaken, Item.relation_join, ...). If a beets upgrade breaks
-fdup, look here first; tests/test_items.py compares the results against lib.items()."""
+relies on some beets internals (Item._fields, Item._awaken, Item.relation_join, Template.expr, ...). If a beets
+upgrade breaks fdup, look here first; tests/test_items.py compares the results against lib.items()."""
 
 import collections
 import functools
+from collections.abc import Callable
 from typing import Any
 
 import beets
-from beets import context
+from beets import context, plugins
 from beets.dbcore import AndQuery, Query, types
 from beets.library import Item, Library, parse_query_parts
 from beets.library.fields import TYPE_BY_FIELD
-from beets.util.functemplate import Template
+from beets.library.models import DefaultTemplateFunctions
+from beets.util.functemplate import Call, Expression, Symbol, Template
 
 
 @functools.lru_cache(maxsize=128)
@@ -21,6 +23,33 @@ def _template(fmt: str) -> Template:
     """A compiled (cached) Template. beets has its own cached version of this, but renamed it in 2.14
     (template -> get_template), so fdup keeps its own to work with both."""
     return Template(fmt)
+
+
+@functools.cache
+def _template_functions() -> dict[str, Callable[..., str]]:
+    """beets' template functions (%upper{}, %if{}, ...) and plugins' ones, for formatting MinItems. Without the whole
+    item and the library, %aunique{} and %sunique{} give '', and %ifdef{} is left out (so it's printed as is)."""
+    functions = DefaultTemplateFunctions().functions()
+    functions.pop("ifdef", None)
+    functions.update(plugins.template_funcs())
+    return functions
+
+
+def template_fields(fmt: str) -> set[str]:
+    """The item fields a template uses ($name, including in function arguments), for fetch_items. Leaves out fdup's
+    own $fdup_* values, and computed fields (e.g. $filesize), which fetch_items can't provide."""
+    fields: set[str] = set()
+
+    def walk(expr: Expression):
+        for part in expr.parts:
+            if isinstance(part, Symbol):
+                fields.add(part.ident)
+            elif isinstance(part, Call):
+                for arg in part.args:
+                    walk(arg)
+
+    walk(_template(fmt).expr)
+    return {field for field in fields if not field.startswith("fdup_")} - Item._getters().keys()
 
 
 class MinItem(dict[str, Any]):
@@ -31,7 +60,7 @@ class MinItem(dict[str, Any]):
             format_spec = beets.config["format_item"].as_str()
         assert isinstance(format_spec, str)
         # Cached: constructing a new Template per item dominated output time.
-        return _template(format_spec).substitute(self.formatted())
+        return _template(format_spec).substitute(self.formatted(), _template_functions())
 
     def formatted(self) -> dict[str, str]:
         """Get a mapping containing all values on this object formatted
