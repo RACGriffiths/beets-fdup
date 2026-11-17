@@ -6,7 +6,7 @@ How it fits together:
   parsing.py      normalising values, and splitting titles into a core, subtitles and version labels
   fingerprint.py  n-gram fingerprints, compared in bulk with numpy
   matching.py     per-field fuzzy matching, combined into item matches
-  grouping.py     grouping matches (--group-results)
+  grouping.py     grouping matches (the default output, unless --by-track)
   output.py       printing matches and groups, with their prefixes
 """
 
@@ -47,10 +47,18 @@ class FDupPlugin(BeetsPlugin):
             action="store_true",
             help="Find duplicates of query results within the whole library, not just within the query results",
         )
+        # A pair of options for the group_results setting, like beets' own --copy/--nocopy.
         command.parser.add_option(
             "--group-results",
+            dest="group_results",
             action="store_true",
-            help="Group the results",
+            help="Print groups of tracks that all match each other (the default)",
+        )
+        command.parser.add_option(
+            "--by-track",
+            dest="group_results",
+            action="store_false",
+            help="Print each track followed by its duplicates, instead of groups (opposite of --group-results)",
         )
         command.parser.add_option(
             "-f", "--format",
@@ -80,13 +88,13 @@ class FDupPlugin(BeetsPlugin):
         self._log.debug("finding matches...")
         matches = find_matches(fields, set1, set2)
         labels = functools.partial(version_labels, fields)
-        if not grouped:
-            n_matches = print_matches(matches, item_by_id, output_format, labels)
-            self._log.info("found {} duplicate pairs", n_matches)
-        else:
+        if grouped:
             groups = group_matches(matches, set1, set2)
             print_groups(groups, item_by_id, output_format, labels)
             self._log.info("found {} groups of duplicates", len(groups))
+        else:
+            n_matches = print_matches(matches, item_by_id, output_format, labels)
+            self._log.info("found {} duplicate pairs", n_matches)
 
     def _fetch_items(
             self, lib: Library, opts: Values, args: list[str], fields: list[FieldMatcher], output_fields: set[str],

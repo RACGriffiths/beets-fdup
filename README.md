@@ -35,11 +35,11 @@ Requires Python 3.11+ and beets 2.10+.
 ## Usage
 
 ```bash
-beet fdup                                   # all duplicates in the library
+beet fdup                                   # all duplicates in the library, in groups that all match each other
 beet fdup artist:queen                      # duplicates among Queen tracks
 beet fdup --against-all album:greatest      # tracks on 'greatest...' albums with a duplicate anywhere in the library
 beet fdup year:..1980 ~~~ year:1981..       # duplicates of pre-1981 tracks among later ones
-beet fdup --group-results                   # groups of tracks that all match each other
+beet fdup --by-track                        # each track, followed by its duplicates, instead of groups
 beet fdup --match-threshold 0.9             # stricter matching (1.0 = perfect match)
 beet fdup -f '$album: $title'               # print each track with this format (also --format)
 ```
@@ -48,21 +48,30 @@ Queries use the normal [beets query syntax](https://beets.readthedocs.io/en/stab
 query, tracks are only compared with other tracks matching it, unless you add `--against-all`. With two queries
 separated by `~~~`, tracks matching the first are compared with tracks matching the second.
 
-Output lists each track, followed by its duplicates (best match first), with any version labels:
+Output lists groups of tracks that all match each other, largest first, with any version labels:
 
 ```
-Queen - One Vision (4:02) - /music/Queen/Greatest Hits II/09 One Vision.mp3
-├─ Queen - One Vision (5:11) - /music/Queen/A Kind of Magic/01 One Vision.mp3
-└─ Queen - One Vision (Extended Version) (6:26) [extended] - /music/Queen/Singles/12 One Vision.mp3
+┌── Queen - One Vision (4:02) - /music/Queen/Greatest Hits II/09 One Vision.mp3
+├── Queen - One Vision (5:11) - /music/Queen/A Kind of Magic/01 One Vision.mp3
+└── Queen - One Vision (Extended Version) (6:26) [extended] - /music/Queen/Singles/12 One Vision.mp3
 ```
 
-With `--group-results`, each group is printed together, each track marked by which query it came from: `◂` the
-first query only, `▸` the second query only (with `--against-all`, the rest of the library), `─` both:
+Each track is marked by which query it came from: `◂` the first query only, `▸` the second query only (with
+`--against-all`, the rest of the library), `─` both (so always `─` with one query). For example, with two queries:
 
 ```
 ┌─◂ Johnny Cash - I Walk the Line (2:41) - /music/Charts/Billboard Hot 100 - 1956/81 I Walk the Line.mp3
 ├─▸ Johnny Cash - I Walk the Line (2:42) - /music/Johnny Cash/At His Best/03 I Walk the Line.mp3
 └─▸ Johnny Cash - I Walk the Line (live) (2:57) [live] - /music/Johnny Cash/At San Quentin/03 I Walk the Line.mp3
+```
+
+With `--by-track`, each track is listed instead, followed by its duplicates (best match first). With one query, each
+pair of duplicates appears twice, once under each track:
+
+```
+Queen - One Vision (4:02) - /music/Queen/Greatest Hits II/09 One Vision.mp3
+├─ Queen - One Vision (5:11) - /music/Queen/A Kind of Magic/01 One Vision.mp3
+└─ Queen - One Vision (Extended Version) (6:26) [extended] - /music/Queen/Singles/12 One Vision.mp3
 ```
 
 ## Configuration
@@ -72,7 +81,7 @@ These are the defaults; set any of them under `fdup:` in your beets config.
 ```yaml
 fdup:
   fields: [artist, title]     # items must match on all of these
-  group_results: no           # as --group-results
+  group_results: yes          # no: as --by-track (and --group-results overrides no)
   query_separator: "~~~"
 
   default_field_config:       # settings for every field...
@@ -99,16 +108,9 @@ fdup:
 
   output:
     format: "$artist - $title ($length)$fdup_labels - $path"   # each track (as -f/--format), after its prefix
-    matches:                  # each track, then its duplicates
+    groups:                   # groups of tracks that all match each other
       # format: ...           # overrides output.format for this mode
       prefix:                 # by the line's position in the block
-        first: ""             # the track
-        middle: "├─ "         # its duplicates...
-        last: "└─ "           # ...and the last one
-      separator: "\n"         # printed between blocks ("\n": a blank line)
-    groups:                   # with --group-results
-      # format: ...
-      prefix:
         first: "┌─"
         middle: "├─"
         last: "└─"
@@ -116,6 +118,13 @@ fdup:
         query1: "◂ "          # the first query only
         both: "─ "
         query2: "▸ "          # the second query only (with --against-all, the rest of the library)
+      separator: "\n"         # printed between blocks ("\n": a blank line)
+    by_track:                 # with --by-track: each track, then its duplicates
+      # format: ...
+      prefix:
+        first: ""             # the track
+        middle: "├─ "         # its duplicates...
+        last: "└─ "           # ...and the last one
       separator: "\n"
 ```
 
@@ -124,10 +133,10 @@ Each line is the prefix (and in groups, the marker), then the track, formatted a
 (`$album`, `$year`, flexible attributes, ...), template functions such as `%upper{}` and `%if{}`, and fdup's own:
 
 - `$fdup_labels`: the track's version labels, e.g. ` [live, remaster]` (with a leading space, or empty if none).
-- `$fdup_score`: in the default mode, a duplicate's match score with the track above it (empty on the track's own
-  line); in groups, the track's weakest match with the others in its group (that it was compared with).
-- `$fdup_versions`: in the default mode, the version labels that differ between a duplicate and the track above it,
-  in the same form as `$fdup_labels` (empty on the track's own line, and in groups).
+- `$fdup_score`: in groups, the track's weakest match with the others in its group (that it was compared with); with
+  `--by-track`, a duplicate's match score with the track above it (empty on the track's own line).
+- `$fdup_versions`: with `--by-track`, the version labels that differ between a duplicate and the track above it, in
+  the same form as `$fdup_labels` (empty on the track's own line, and in groups).
 
 Computed fields such as `$filesize` aren't available, and nor are `%aunique{}`, `%sunique{}` and `%ifdef{}`, which need
 the whole item or the library. If your terminal can't show the tree characters, use ASCII ones, e.g. `|- ` and `` `- ``.
@@ -199,7 +208,7 @@ Layout:
 | `beetsplug/fdup/parsing.py` | normalising, splitting values into core / subtitles / labels |
 | `beetsplug/fdup/fingerprint.py` | n-gram fingerprints, bulk comparison with numpy |
 | `beetsplug/fdup/matching.py` | per-field fuzzy matching, combined into item matches |
-| `beetsplug/fdup/grouping.py` | `--group-results` |
+| `beetsplug/fdup/grouping.py` | grouping matches into groups that all match each other (the default output) |
 | `beetsplug/fdup/output.py` | printing matches and groups, with their prefixes |
 | `tests/` | pytest tests; `test_plugin.py` runs `beet fdup` end to end on a temporary library |
 | `scripts/profile_fdup.py` | profile a `beet fdup` run with cProfile (or see its docstring for line_profiler) |

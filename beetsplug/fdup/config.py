@@ -40,7 +40,7 @@ DEFAULT_QUALIFIERS: dict[str, Any] = {
 DEFAULT_CONFIG: dict[str, Any] = {
     "query_separator": "~~~",
     "fields": ["artist", "title"],
-    "group_results": False,
+    "group_results": True,     # False: as --by-track.
     "default_field_config": {
         "alphabet": "abcdefghijklmnopqrstuvwxyz 0123456789",   # Characters fingerprinted; others are ignored.
         "word_size": 1536,
@@ -75,17 +75,17 @@ DEFAULT_CONFIG: dict[str, Any] = {
         # Each item's line, after its prefix: a beets template, which can also use $fdup_labels, $fdup_score and
         # $fdup_versions (see the README). Each mode below can set its own 'format', overriding this one.
         "format": "$artist - $title ($length)$fdup_labels - $path",
-        # The default mode: each item, then its matches.
-        "matches": {
-            "prefix": {"first": "", "middle": "├─ ", "last": "└─ "},  # by the line's position in the block
-            "separator": "\n",  # printed between blocks ("\n": a blank line)
-        },
-        # --group-results: groups of items that all match each other.
+        # The default mode: groups of items that all match each other.
         "groups": {
-            "prefix": {"first": "┌─", "middle": "├─", "last": "└─"},
+            "prefix": {"first": "┌─", "middle": "├─", "last": "└─"},  # by the line's position in the block
             # After the prefix: which query the item came from. The first query only, both, or the second query only
             # (with --against-all, the rest of the library).
             "marker": {"query1": "◂ ", "both": "─ ", "query2": "▸ "},
+            "separator": "\n",  # printed between blocks ("\n": a blank line)
+        },
+        # --by-track: each item, then its matches.
+        "by_track": {
+            "prefix": {"first": "", "middle": "├─ ", "last": "└─ "},
             "separator": "\n",
         },
     },
@@ -93,9 +93,9 @@ DEFAULT_CONFIG: dict[str, Any] = {
 
 # Output settings that have been replaced, and by what.
 _REPLACED_OUTPUT_KEYS = {
-    "src_fmt": "output.format and output.matches.prefix",
-    "dup_fmt": "output.format and output.matches.prefix",
-    "separator": "output.matches.separator and output.groups.separator",
+    "src_fmt": "output.format and output.by_track.prefix",
+    "dup_fmt": "output.format and output.by_track.prefix",
+    "separator": "output.groups.separator and output.by_track.separator",
 }
 
 
@@ -124,13 +124,13 @@ def build_field_matchers(config: confuse.ConfigView, threshold: float | None = N
 
 
 def build_output_format(config: confuse.ConfigView, grouped: bool, format_override: str | None = None) -> OutputFormat:
-    """The output settings for printing groups or matches. format_override, if given, overrides the configured
+    """The output settings for printing groups, or by track. format_override, if given, overrides the configured
     format (the --format option)."""
     output = config["output"]
     for key, replacement in _REPLACED_OUTPUT_KEYS.items():
         if output[key].exists():
             raise UserError(f"fdup: the output.{key} setting has been replaced by {replacement} (see the README)")
-    mode = output["groups" if grouped else "matches"]
+    mode = output["groups" if grouped else "by_track"]
     return OutputFormat(
         format=format_override or mode["format"].get(confuse.Optional(str)) or output["format"].get(str),
         prefix={position: mode["prefix"][position].get(str) for position in POSITIONS},

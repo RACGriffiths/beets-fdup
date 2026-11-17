@@ -3,7 +3,7 @@
 Usage, from the project's virtualenv:
     python scripts/profile_fdup.py [beet arguments...]
 e.g.
-    python scripts/profile_fdup.py fdup --group-results > /dev/null
+    python scripts/profile_fdup.py fdup --by-track > /dev/null
     python scripts/profile_fdup.py -c path/to/config.yaml fdup artist:queen
 
 The command's output goes to stdout as usual. The profile goes to stderr: fdup's own functions sorted by cumulative

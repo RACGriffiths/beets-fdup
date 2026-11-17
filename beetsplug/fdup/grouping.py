@@ -1,4 +1,4 @@
-"""Grouping pairwise matches into groups of items that all match each other (the --group-results option).
+"""Grouping pairwise matches into groups of items that all match each other (the default output, unless --by-track).
 
 Each item is in one of three subsets, depending on which of the two queried sets it came from:
   'a': only in set 1 (the source items),

@@ -22,7 +22,7 @@ MARKER_SUBSETS = {"query1": "a", "both": "b", "query2": "c"}
 
 @dataclasses.dataclass(frozen=True)
 class OutputFormat:
-    """How to print each block, for one mode (matches or groups): see the 'output' config."""
+    """How to print each block, for one mode (groups or by_track): see the 'output' config."""
     format: str                 # the item itself: a beets template
     prefix: dict[str, str]      # by position (see POSITIONS)
     separator: str              # printed between blocks

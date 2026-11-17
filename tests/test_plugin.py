@@ -3,11 +3,11 @@
 import pytest
 from beets.ui import UserError
 
-# Machine-readable output: each source item's title, then its duplicates' titles indented, with any differing version
-# labels; groups: each group's titles, groups separated by blank lines.
+# Machine-readable output: groups: each group's titles, groups separated by blank lines; --by-track: each source item's
+# title, then its duplicates' titles indented, with any differing version labels.
 OUTPUT = {
     "format": "$title$fdup_versions",
-    "matches": {"prefix": {"first": "", "middle": "  ", "last": "  "}, "separator": ""},
+    "by_track": {"prefix": {"first": "", "middle": "  ", "last": "  "}, "separator": ""},
     "groups": {"format": "$title", "prefix": {"first": "", "middle": "", "last": ""},
                "marker": {"query1": "", "both": "", "query2": ""}},
 }
@@ -26,11 +26,11 @@ def run(env, capsys, *args: str) -> str:
 
 
 def fdup(env, capsys, *args: str) -> dict[str, set[str]]:
-    """Run `beet fdup *args`; return {title: {titles of its duplicates, with version labels}}."""
+    """Run `beet fdup --by-track *args`; return {title: {titles of its duplicates, with version labels}}."""
     env.config["fdup"]["output"].set(OUTPUT)
     found: dict[str, set[str]] = {}
     src = ""
-    for line in run(env, capsys, *args).splitlines():
+    for line in run(env, capsys, "--by-track", *args).splitlines():
         if line.startswith("  "):
             found[src].add(line.strip())
         elif line:
@@ -40,9 +40,9 @@ def fdup(env, capsys, *args: str) -> dict[str, set[str]]:
 
 
 def fdup_groups(env, capsys, *args: str) -> set[frozenset[str]]:
-    """Run `beet fdup --group-results *args`; return the groups, as sets of titles."""
+    """Run `beet fdup *args` (grouped, the default); return the groups, as sets of titles."""
     env.config["fdup"]["output"].set(OUTPUT)
-    blocks = run(env, capsys, "--group-results", *args).split("\n\n")
+    blocks = run(env, capsys, *args).split("\n\n")
     return {frozenset(block.splitlines()) for block in blocks if block}
 
 
@@ -138,10 +138,27 @@ def test_group_results(beets_env, capsys):
     }
 
 
+@pytest.mark.parametrize(("setting", "args", "grouped"), [
+    (None, (), True),                       # grouped by default
+    (None, ("--by-track",), False),
+    (False, (), False),
+    (False, ("--group-results",), True),    # each option overrides the setting
+    (True, ("--by-track",), False),
+    (None, ("--by-track", "--group-results"), True),  # the last option wins
+])
+def test_group_results_setting_and_options(beets_env, capsys, setting, args, grouped):
+    add(beets_env, ("ABBA", "Waterloo"), ("ABBA", "Waterloo (live)"))
+    if setting is not None:
+        beets_env.config["fdup"]["group_results"].set(setting)
+    expected = ({"┌── Waterloo\n└── Waterloo (live)"} if grouped
+                else {"Waterloo\n└─ Waterloo (live)", "Waterloo (live)\n└─ Waterloo"})
+    assert blocks(run(beets_env, capsys, *args, "-f", "$title")) == expected
+
+
 def test_matches_layout(beets_env, capsys):
     # The default prefixes: each block is a tree, with the matches best first (exact title matches before fuzzy ones).
     add(beets_env, ("ABBA", "Waterloo"), ("ABBA", "Waterloo (live)"), ("ABBA", "Waterlooo"))
-    assert blocks(run(beets_env, capsys, "-f", "$title$fdup_labels")) == {
+    assert blocks(run(beets_env, capsys, "--by-track", "-f", "$title$fdup_labels")) == {
         "Waterloo\n├─ Waterloo (live) [live]\n└─ Waterlooo",
         "Waterloo (live) [live]\n├─ Waterloo\n└─ Waterlooo",
         "Waterlooo\n├─ Waterloo\n└─ Waterloo (live) [live]",
@@ -155,7 +172,7 @@ def test_groups_layout(beets_env, capsys):
     add(beets_env, ("ABBA", "Waterlooo (live)"), year=1979)
     add(beets_env, ("ABBA", "Waterloo - 2001 Remaster"), year=2001)
     add(beets_env, ("Queen", "Bohemian Rhapsody"), ("Queen", "Bohemian Rhapsody"), year=1980)
-    output = run(beets_env, capsys, "--group-results", "-f", "$title$fdup_labels", "year:..1980", "~~~", "year:1980..")
+    output = run(beets_env, capsys, "-f", "$title$fdup_labels", "year:..1980", "~~~", "year:1980..")
     assert blocks(output) == {
         "┌─◂ Waterloo\n├─◂ Waterlooo (live) [live]\n└─▸ Waterloo - 2001 Remaster [remaster]",
         "┌── Bohemian Rhapsody\n└── Bohemian Rhapsody",
@@ -167,7 +184,7 @@ def test_group_scores(beets_env, capsys):
     add(beets_env, ("ABBA", "Waterloo"), year=1974)
     add(beets_env, ("ABBA", "Waterlooo"), year=1979)
     add(beets_env, ("ABBA", "Waterloo (live)"), year=2001)
-    output = run(beets_env, capsys, "--group-results", "-f", "$title $fdup_score", "year:..1980", "~~~", "year:1980..")
+    output = run(beets_env, capsys, "-f", "$title $fdup_score", "year:..1980", "~~~", "year:1980..")
     scores = dict(line[4:].rsplit(" ", 1) for line in output.splitlines())
     assert scores["Waterloo"] == "1.00"
     assert scores["Waterlooo"] == scores["Waterloo (live)"] < "1.00"
@@ -177,7 +194,7 @@ def test_format_can_use_any_item_field(beets_env, capsys):
     # Fields used in the format are fetched, even if fdup doesn't otherwise need them.
     add(beets_env, ("ABBA", "Waterloo"), album="Gold", mood="happy")
     add(beets_env, ("ABBA", "Waterloo (live)"), album="Live", mood="happy")
-    assert blocks(run(beets_env, capsys, "-f", "$album: %upper{$title} $mood")) == {
+    assert blocks(run(beets_env, capsys, "--by-track", "-f", "$album: %upper{$title} $mood")) == {
         "Gold: WATERLOO happy\n└─ Live: WATERLOO (LIVE) happy",
         "Live: WATERLOO (LIVE) happy\n└─ Gold: WATERLOO happy",
     }
@@ -186,8 +203,9 @@ def test_format_can_use_any_item_field(beets_env, capsys):
 def test_each_mode_can_override_the_format(beets_env, capsys):
     add(beets_env, ("ABBA", "Waterloo"), ("ABBA", "Waterloo (live)"))
     beets_env.config["fdup"]["output"].set({"format": "$title", "groups": {"format": "$artist: $title"}})
-    assert blocks(run(beets_env, capsys)) == {"Waterloo\n└─ Waterloo (live)", "Waterloo (live)\n└─ Waterloo"}
-    assert blocks(run(beets_env, capsys, "--group-results")) == {"┌── ABBA: Waterloo\n└── ABBA: Waterloo (live)"}
+    assert blocks(run(beets_env, capsys)) == {"┌── ABBA: Waterloo\n└── ABBA: Waterloo (live)"}
+    assert blocks(run(beets_env, capsys, "--by-track")) == {
+        "Waterloo\n└─ Waterloo (live)", "Waterloo (live)\n└─ Waterloo"}
     # The --format option overrides both.
     assert blocks(run(beets_env, capsys, "--group-results", "-f", "$title")) == {"┌── Waterloo\n└── Waterloo (live)"}
 
