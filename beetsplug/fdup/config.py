@@ -42,7 +42,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "fields": ["artist", "title"],
     "group_results": False,
     "default_field_config": {
-        "alphabet": "abcdefghijklmnopqrstuvwxyz 0123456789",
+        "alphabet": "abcdefghijklmnopqrstuvwxyz 0123456789",   # Characters fingerprinted; others are ignored.
         "word_size": 1536,
         "match_threshold": 0.75,
         "difference_penalty": 0.025,  # Kept low e.g. < 0.05 (additional characters don't necessarily matter much, can include qualifying info e.g. (live) or whatever)
@@ -54,6 +54,10 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "normalise": [
             [r"\s*&\s*", " and "],
             [r"(?<=\b\w)\.(?=\w\b)", ""],   # Dots in initialisms: s.o.s. -> sos
+            [r"(?<=\b[a-z])-(?=[a-z]\b)", ""],  # Hyphens between single letters: d-i-v-o-r-c-e -> divorce
+            # Other hyphens within words: be-bop-a-lula -> be bop a lula. (Fingerprints ignore punctuation, so a
+            # hyphen left in would join the words. Hyphens with spaces around them separate qualifiers: not touched.)
+            [r"(?<=\w)-(?=\w)", " "],
         ],
         "extra_normalise": [],
         "qualifiers": None,     # How to split values into core and qualifiers, null: don't. See DEFAULT_QUALIFIERS.

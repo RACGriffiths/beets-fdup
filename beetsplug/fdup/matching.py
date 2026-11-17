@@ -55,6 +55,12 @@ class FieldMatcher:
         self.main_keys: list[list[int]] = [sorted({key(p.core), key(p.full)}) for p in self.parsed]
         self.alias_keys: list[list[int]] = [sorted({key(s) for s in p.subtitles}) for p in self.parsed]
         self.fps = FingerprintSet(self.preprocessor, key_idx_by_text)
+        # Keys with nothing to fingerprint (e.g. emptied by a normalise rule) would score 1.0 against each other: leave
+        # them out of fuzzy matching. (Items with the same value still match.)
+        empty = set(np.flatnonzero(self.fps.counts == 0).tolist())
+        if empty:
+            self.main_keys = [[k for k in keys if k not in empty] for keys in self.main_keys]
+            self.alias_keys = [[k for k in keys if k not in empty] for keys in self.alias_keys]
         self._key_idx_by_text = key_idx_by_text
         self._extra_fps: dict[str, tuple[np.ndarray, np.int64]] = {}
         self._decided: dict[tuple[int, int], float | None] = {}

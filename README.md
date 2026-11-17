@@ -81,10 +81,12 @@ fdup:
                               # dice: relative to both, so a short value doesn't match a longer one containing it
     difference_penalty: 0.025
     word_size: 1536           # fingerprint size in bits
-    alphabet: "abcdefghijklmnopqrstuvwxyz 0123456789"
+    alphabet: "abcdefghijklmnopqrstuvwxyz 0123456789"   # characters that count; others (punctuation, ...) are ignored
     normalise:                # [regex, replacement] pairs, applied after removing accents and lower-casing
       - ['\s*&\s*', ' and ']
       - ['(?<=\b\w)\.(?=\w\b)', '']     # s.o.s. -> sos
+      - ['(?<=\b[a-z])-(?=[a-z]\b)', '']  # d-i-v-o-r-c-e -> divorce
+      - ['(?<=\w)-(?=\w)', ' ']         # be-bop-a-lula -> be bop a lula
     extra_normalise: []       # more rules, applied after these (so you keep the defaults)
     qualifiers: null          # how to split values into a core and qualifiers; null: don't (see below)
     exact_key: null           # a field which, when both items have it, decides the match on its own
@@ -168,9 +170,11 @@ fdup:
 
 ## How it works
 
-1. **Normalise** each value: remove accents, lower-case, apply the `normalise` rules.
+1. **Normalise** each value: remove accents, lower-case, apply the `normalise` rules. A value of only symbols, such as
+   an emoji title, is spelled out with Unicode names instead (`👋` → `waving hand sign`), so different symbols differ.
 2. **Split** values into a core, subtitles and version labels (fields with `qualifiers`).
-3. **Fingerprint** each distinct value: hash its character n-grams into a bit array.
+3. **Fingerprint** each distinct value: hash its character n-grams into a bit array, ignoring characters that aren't in
+   the `alphabet` (so `Help!` and `Help` are the same).
 4. **Compare** fingerprints in bulk with numpy, scoring the shared bits against what chance would give. Candidate
    pairs are then checked with the qualifier rules (shared subtitles, part numbers, alternate titles, ...).
 5. **Combine** fields: items match if they match on every field (fields are matched in order, each narrowing the

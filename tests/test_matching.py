@@ -59,6 +59,34 @@ class TestMatching:
                               ("C+C Music Factory", "Gonna Make You Sweat (Everybody Dance Now)")])
         assert len(matches) == 2
 
+    def test_punctuation_is_ignored(self):
+        matches = matches_of([("The Beatles", "Help"), ("The Beatles", "Help!"),
+                              ("Bob Dylan", "Lay Lady Lay"), ("Bob Dylan", "Lay, Lady, Lay"),
+                              ("ABBA", "S.O.S."), ("ABBA", "SOS")])
+        assert len(matches) == 6
+        for title1, title2 in [("Help", "Help!"), ("Lay Lady Lay", "Lay, Lady, Lay"), ("S.O.S.", "SOS")]:
+            assert matched(matches, title1, title2)
+            assert matches[(title1, title2)].fits["title"] == 1.0
+
+    def test_hyphens_within_words(self):
+        matches = matches_of([("Gene Vincent", "Be-Bop-A-Lula"), ("Gene Vincent", "Be Bop A Lula"),
+                              ("Tammy Wynette", "D-I-V-O-R-C-E"), ("Tammy Wynette", "D.I.V.O.R.C.E.")])
+        assert matched(matches, "Be-Bop-A-Lula", "Be Bop A Lula")
+        assert matched(matches, "D-I-V-O-R-C-E", "D.I.V.O.R.C.E.")
+
+    def test_different_emoji_titles_dont_match(self):
+        assert matches_of([("Coldplay", "👋"), ("Coldplay", "🌈"), ("Coldplay", "✨"), ("Coldplay", "🪐")]) == {}
+
+    def test_same_emoji_title_matches(self):
+        matches = matches_of([("Coldplay", "❤️"), ("Coldplay", "❤")])  # With and without the emoji variation selector.
+        assert matched(matches, "❤️", "❤")
+
+    def test_values_emptied_by_normalising_dont_match(self):
+        # Both titles normalise to a value with nothing to fingerprint: '!' and '?'.
+        matches = matches_of([("Muse", "abc!"), ("Muse", "def?")],
+                             field_configs={"title": {"extra_normalise": [["[a-z]", ""]]}})
+        assert matches == {}
+
     def test_different_part_numbers(self):
         matches = matches_of([("Muse", "Exogenesis: Symphony, Part 2: Cross-Pollination"),
                               ("Muse", "Exogenesis: Symphony, Part 3: Redemption")])

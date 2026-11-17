@@ -1,6 +1,7 @@
 """Normalising field values, and splitting them into a core and qualifiers (subtitles, version markers, numbers)."""
 
 import re
+import unicodedata
 from typing import Any, NamedTuple
 
 from unidecode import unidecode
@@ -8,11 +9,27 @@ from unidecode import unidecode
 _WORD = re.compile(r"[a-z0-9]+")
 _PLACEHOLDER = re.compile(r"\0(\d+)\0")
 _ROMAN_NUMERALS = frozenset("ii iii iv v vi vii viii ix x xi xii xiii xiv xv xvi xvii xviii xix xx".split())
+# Unicode categories of characters with no look of their own, left out when spelling out symbols: combining marks,
+# variation selectors (e.g. the one in '❤️') and joiners (e.g. inside '👨‍👩‍👧').
+_INVISIBLE = frozenset({"Mn", "Me", "Cf"})
 
 
 def collapse(text: str) -> str:
     """Collapse runs of whitespace to single spaces, and trim the ends."""
     return " ".join(text.split())
+
+
+def _transliterate(text: str) -> str:
+    """The text in ASCII, with accents removed (by unidecode). But a value of only symbols, which unidecode would leave
+    with no letter or digit (e.g. emoji, which it removes, or '!!!'), is spelled out with each character's Unicode
+    name instead, e.g. '👋' -> 'WAVING HAND SIGN', so that different symbols stay different values."""
+    ascii_text = unidecode(text)
+    if any(ch.isalnum() for ch in ascii_text):
+        return ascii_text
+    # (A character this Python's Unicode data doesn't know yet, e.g. a new emoji, gets its code point instead.)
+    names = [unicodedata.name(ch, f"U+{ord(ch):X}") for ch in text
+             if not ch.isspace() and unicodedata.category(ch) not in _INVISIBLE]
+    return " ".join(names) or ascii_text
 
 
 def _numbers(text: str) -> set[str]:
@@ -57,7 +74,7 @@ class ValueParser:
         self._marker_patterns = [(re.compile(p), label) for p, label in qualifiers["version_marker_patterns"].items()]
 
     def normalise(self, text: str) -> str:
-        text = unidecode(text).casefold()
+        text = _transliterate(text).casefold()
         for pattern, replacement in self._rules:
             text = pattern.sub(replacement, text)
         return collapse(text)

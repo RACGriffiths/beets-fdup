@@ -29,6 +29,16 @@ class TestTextPreprocessor:
     def test_case_and_accents_are_ignored(self):
         assert PREPROCESSOR.text2fingerprint("Café").bits == PREPROCESSOR.text2fingerprint("CAFE").bits
 
+    def test_characters_outside_the_alphabet_are_ignored(self):
+        assert PREPROCESSOR.text2fingerprint("Help!").bits == PREPROCESSOR.text2fingerprint("help").bits
+        assert PREPROCESSOR.text2fingerprint("don't").bits == PREPROCESSOR.text2fingerprint("dont").bits
+
+    def test_spaces_left_by_ignored_characters_are_collapsed(self):
+        assert PREPROCESSOR.text2fingerprint("lay , lady - lay !").bits == PREPROCESSOR.text2fingerprint("lay lady lay").bits
+
+    def test_only_characters_outside_the_alphabet_has_no_bits(self):
+        assert PREPROCESSOR.text2fingerprint("!?").n == 0
+
     def test_repeated_text_sets_more_bits(self):
         assert PREPROCESSOR.text2fingerprint("abcde abcde").n > PREPROCESSOR.text2fingerprint("abcde").n
 

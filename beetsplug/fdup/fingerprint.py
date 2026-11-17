@@ -29,12 +29,12 @@ class TextPreprocessor:
             word_size: int = 384):
         """Initialize the preprocessor."""
 
-        # Initialise character map:
+        # Initialise character map. Characters outside it are ignored (see text2fingerprint).
         self.char_map: dict[str, int] = {}
         for i, char in enumerate(alphabet):
             self.char_map[char] = i
-        self.miss_val = len(self.char_map)
-        self.m = len(self.char_map) + 1
+        # m: the number of distinct values hashed (the alphabet, plus start and end markers if they aren't in it).
+        self.m = len(self.char_map)
         self.word_size = word_size
 
         # Maybe add distinct value for start effects:
@@ -61,16 +61,19 @@ class TextPreprocessor:
         # Sanitize input by:
         #   - converting accented characters to regular form
         #   - lowercasing
-        text = unidecode(text).casefold()
+        #   - dropping characters outside the alphabet (e.g. punctuation: 'help!' -> 'help'), then any extra spaces
+        #     that leaves ('lay , lady' -> 'lay lady')
+        text = "".join(ch for ch in unidecode(text).casefold() if ch in self.char_map)
+        text = " ".join(word for word in text.split(" ") if word)
         if not text:
             return Fingerprint(bits)
 
         # Aggregate bits for each trigram in the text.
         counter: dict[int, int] = collections.defaultdict(int)
         b_val = self.start_val
-        c_val = self.char_map.get(text[0], self.miss_val)
+        c_val = self.char_map[text[0]]
         for cChar in text[1:]:
-            a_val, b_val, c_val = b_val, c_val, self.char_map.get(cChar, self.miss_val)
+            a_val, b_val, c_val = b_val, c_val, self.char_map[cChar]
             self._add_trigram(counter, a_val, b_val, c_val)
 
         # Add in end-effects.

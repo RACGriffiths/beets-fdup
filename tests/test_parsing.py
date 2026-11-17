@@ -1,9 +1,9 @@
 """Tests for value parsing: normalise rules, and splitting values into a core, subtitles, labels and numbers."""
 
-from beetsplug.fdup.config import DEFAULT_QUALIFIERS
+from beetsplug.fdup.config import DEFAULT_CONFIG, DEFAULT_QUALIFIERS
 from beetsplug.fdup.parsing import ValueParser
 
-DEFAULT_RULES = [(r"\s*&\s*", " and "), (r"(?<=\b\w)\.(?=\w\b)", "")]
+DEFAULT_RULES = [(pattern, replacement) for pattern, replacement in DEFAULT_CONFIG["default_field_config"]["normalise"]]
 
 
 class TestValueParser:
@@ -13,6 +13,24 @@ class TestValueParser:
         assert parser.normalise("Simon & Garfunkel") == "simon and garfunkel"
         assert parser.normalise("S.O.S.") == "sos."
         assert parser.normalise("  Café   del  Mar ") == "cafe del mar"
+        assert parser.normalise("Be-Bop-A-Lula") == "be bop a lula"
+        assert parser.normalise("D-I-V-O-R-C-E") == "divorce"
+        assert parser.normalise("1-2-3") == "1 2 3"
+
+    def test_normalise_rules_keep_separators(self):
+        parsed = ValueParser(DEFAULT_RULES, DEFAULT_QUALIFIERS).parse(
+            ValueParser(DEFAULT_RULES, None).normalise("Exogenesis: Part 2 - Cross-Pollination"))
+        assert parsed.core == "exogenesis"
+        assert parsed.subtitles == ("part 2", "cross pollination")
+
+    def test_symbols_only_are_spelled_out(self):
+        parser = ValueParser([], None)
+        assert parser.normalise("👋") == "waving hand sign"     # (unidecode alone would give '')
+        assert parser.normalise("❤️") == parser.normalise("❤") == "heavy black heart"    # Variation selector left out.
+        assert parser.normalise("!!!") == "exclamation mark exclamation mark exclamation mark"
+
+    def test_symbols_among_text_are_dropped(self):
+        assert ValueParser([], None).normalise("A★Teens") == "ateens"
 
     def test_unsplit_field(self):
         parsed = ValueParser([], None).parse("song (live)")
