@@ -99,7 +99,8 @@ class FieldMatcher:
         # each other, an alias key needs alias_threshold against a main key, and alias keys aren't compared together.
         best: dict[tuple[int, int], float] = {}
         threshold = min(self.threshold, self.alias_threshold)
-        for i, j, score in matching_pairs(self.fps, self.compare, threshold, row_keys, None if triangular else col_keys):
+        pairs = matching_pairs(self.fps, self.compare, threshold, row_keys, None if triangular else col_keys)
+        for i, j, score in pairs:
             v1, v2 = row_owners[i], col_owners[j]
             if v1 == v2 or (row_alias[i] and col_alias[j]):
                 continue
@@ -237,10 +238,10 @@ def find_matches(
     # Aggregate by (normalised) fieldname value, as an index into the field's values.
     ids_by_value_1: dict[int, set[int]] = collections.defaultdict(set[int])
     ids_by_value_2: dict[int, set[int]] = collections.defaultdict(set[int])
-    for id in set1:
-        ids_by_value_1[field.value_idx_by_id[id]].add(id)
-    for id in set2:
-        ids_by_value_2[field.value_idx_by_id[id]].add(id)
+    for id_ in set1:
+        ids_by_value_1[field.value_idx_by_id[id_]].add(id_)
+    for id_ in set2:
+        ids_by_value_2[field.value_idx_by_id[id_]].add(id_)
     # An empty value (e.g. no title) says nothing about which track it is, so items with one match nothing. Otherwise
     # every untagged track would be a duplicate of every other.
     ids_by_value_1.pop(field.empty_value, None)
@@ -249,9 +250,9 @@ def find_matches(
     # Ids in set2 by their exact key (e.g. mb_workid), if the field has one.
     ids2_by_key: dict[Any, set[int]] = collections.defaultdict(set[int])
     if field.exact_key:
-        for id in set2:
-            if field.value_idx_by_id[id] != field.empty_value and (key := field.exact_key_by_id[id]) is not None:
-                ids2_by_key[key].add(id)
+        for id_ in set2:
+            if field.value_idx_by_id[id_] != field.empty_value and (key := field.exact_key_by_id[id_]) is not None:
+                ids2_by_key[key].add(id_)
 
     # Pull out various views of the sets, as arrays of value indices:
     def as_array(values: Collection[int]) -> np.ndarray:

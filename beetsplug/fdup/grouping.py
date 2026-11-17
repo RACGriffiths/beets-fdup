@@ -22,8 +22,8 @@ class Edge:
     id: tuple[int, int]
     weight: float
 
-    def __init__(self, id: tuple[int, int], weight: float):
-        self.id = id
+    def __init__(self, id_: tuple[int, int], weight: float):
+        self.id = id_
         self.weight = weight
 
 
@@ -33,8 +33,8 @@ class Node:
     weight_by_id: dict[int, float]  # match score with each of those
     abc: str                        # which subset this item is in
 
-    def __init__(self, id: int, abc: str):
-        self.id = id
+    def __init__(self, id_: int, abc: str):
+        self.id = id_
         self.abc = abc
         self.conn_abc = collections.defaultdict(set[int])
         self.weight_by_id = {}
@@ -68,12 +68,12 @@ class Group:
     def _update_conn_abc(self, node: Node, abc: str):
         # Update min_weight for valid nodes also connected to new node.
         # Remove potential entirely for previously valid nodes that aren't connected to new node.
-        for id in self.valid_abc[abc]:
-            if id in node.conn_abc[abc]:
-                if node.weight_by_id[id] < self.potentials[id]:
-                    self.potentials[id] = node.weight_by_id[id]
+        for id_ in self.valid_abc[abc]:
+            if id_ in node.conn_abc[abc]:
+                if node.weight_by_id[id_] < self.potentials[id_]:
+                    self.potentials[id_] = node.weight_by_id[id_]
             else:
-                self.potentials.pop(id, None)
+                self.potentials.pop(id_, None)
         self.valid_abc[abc] &= node.conn_abc[abc]
 
     def add_node(self, node: Node):
@@ -174,9 +174,9 @@ def group_matches(matches_by_id1: Iterable[tuple[int, list[Match]]], set1: set[i
 
             # Add the new node to the group, and any edges in edges_remaining which are used can be removed.
             for _, conns in to_add.conn_abc.items():
-                for id in conns:
-                    if id in group.ids:
-                        edges_remaining.pop(_edge_id(to_add.id, id), None)
+                for id_ in conns:
+                    if id_ in group.ids:
+                        edges_remaining.pop(_edge_id(to_add.id, id_), None)
             group.add_node(to_add)
 
         groups.append(group)

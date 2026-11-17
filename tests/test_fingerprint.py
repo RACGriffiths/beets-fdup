@@ -21,26 +21,70 @@ def score(text1: str, text2: str, use_min: bool = True) -> float:
     return float(COMPARE(fps.words[0], fps.counts[0], fps.words[1], fps.counts[1], use_min=use_min))
 
 
+def fingerprint_of(text: str) -> tuple[bytes, int]:
+    """A text's fingerprint: its bits, and how many are set."""
+    fps = FingerprintSet(PREPROCESSOR, [text])
+    return fps.words[0].tobytes(), int(fps.counts[0])
+
+
+class StubPreprocessor:
+    """Gives fixed n-gram counts, to test how FingerprintSet sets bits."""
+    word_size = 64
+
+    def __init__(self, counts: dict[str, dict[int, int]]):
+        self.counts = counts
+
+    def ngram_counts(self, text: str) -> dict[int, int]:
+        return self.counts[text]
+
+
 class TestTextPreprocessor:
 
     def test_empty_text_has_no_bits(self):
-        assert PREPROCESSOR.text2fingerprint("").n == 0
+        assert fingerprint_of("")[1] == 0
 
     def test_case_and_accents_are_ignored(self):
-        assert PREPROCESSOR.text2fingerprint("Café").bits == PREPROCESSOR.text2fingerprint("CAFE").bits
+        assert fingerprint_of("Café") == fingerprint_of("CAFE")
 
     def test_characters_outside_the_alphabet_are_ignored(self):
-        assert PREPROCESSOR.text2fingerprint("Help!").bits == PREPROCESSOR.text2fingerprint("help").bits
-        assert PREPROCESSOR.text2fingerprint("don't").bits == PREPROCESSOR.text2fingerprint("dont").bits
+        assert fingerprint_of("Help!") == fingerprint_of("help")
+        assert fingerprint_of("don't") == fingerprint_of("dont")
 
     def test_spaces_left_by_ignored_characters_are_collapsed(self):
-        assert PREPROCESSOR.text2fingerprint("lay , lady - lay !").bits == PREPROCESSOR.text2fingerprint("lay lady lay").bits
+        assert fingerprint_of("lay , lady - lay !") == fingerprint_of("lay lady lay")
 
     def test_only_characters_outside_the_alphabet_has_no_bits(self):
-        assert PREPROCESSOR.text2fingerprint("!?").n == 0
+        assert fingerprint_of("!?")[1] == 0
 
     def test_repeated_text_sets_more_bits(self):
-        assert PREPROCESSOR.text2fingerprint("abcde abcde").n > PREPROCESSOR.text2fingerprint("abcde").n
+        assert fingerprint_of("abcde abcde")[1] > fingerprint_of("abcde")[1]
+
+
+class TestFingerprintSet:
+
+    def test_repeated_ngrams_set_the_following_bits_wrapping_round(self):
+        fps = FingerprintSet(StubPreprocessor({"a": {5: 3, 10: 1, 63: 2}, "b": {}, "c": {5: 1, 6: 1}}), "abc")
+        # Bit k is byte k // 8's bit 7 - k % 8, as unpackbits reads them (most significant first).
+        set_bits = [np.flatnonzero(np.unpackbits(row.view(np.uint8))).tolist() for row in fps.words]
+        assert set_bits == [[0, 5, 6, 7, 10, 63], [], [5, 6]]
+        assert fps.counts.tolist() == [6, 0, 2]
+
+    def test_rows_are_padded_to_whole_words(self):
+        fps = FingerprintSet(TextPreprocessor(word_size=100), ["hey jude", "hey jude!"])
+        assert fps.words.shape == (2, 2)    # 100 bits round up to 2 uint64 words.
+        assert np.array_equal(fps.words[0], fps.words[1])
+
+    def test_no_texts(self):
+        fps = FingerprintSet(PREPROCESSOR, [])
+        assert fps.words.shape == (0, WORD_SIZE // 64)
+        assert fps.counts.shape == (0,)
+
+    def test_chunks_give_the_same_fingerprints(self, monkeypatch):
+        expected = FingerprintSet(PREPROCESSOR, TITLES)
+        monkeypatch.setattr(fingerprint, "_TEXTS_PER_CHUNK", 3)
+        fps = FingerprintSet(PREPROCESSOR, TITLES)
+        assert np.array_equal(fps.words, expected.words)
+        assert np.array_equal(fps.counts, expected.counts)
 
 
 class TestCompare:

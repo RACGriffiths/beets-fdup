@@ -18,12 +18,12 @@ test:
   parallel:
     matrix:
       - PYTHON_VERSION: "3.11"
-        DEPS: "beets==2.10.* numpy==2.0.* bitarray==3.0.*"
+        DEPS: "beets==2.10.* numpy==2.0.*"
       - PYTHON_VERSION: ["3.12", "3.13", "3.14"]
         DEPS: "beets"
   script:
     - pip install -e . $DEPS pytest responses
-    - pip list | grep -iE '^(beets|numpy|bitarray) '
+    - pip list | grep -iE '^(beets|numpy) '
     - pytest
 
 lint:

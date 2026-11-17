@@ -254,13 +254,6 @@ def test_each_mode_can_override_the_format(beets_env, capsys):
     assert blocks(run(beets_env, capsys, "--group-results", "-f", "$title")) == {"┌── Waterloo (live)\n└── Waterloo"}
 
 
-@pytest.mark.parametrize("key", ["src_fmt", "dup_fmt", "separator"])
-def test_replaced_output_settings_are_an_error(beets_env, capsys, key):
-    beets_env.config["fdup"]["output"][key].set("x")
-    with pytest.raises(UserError, match=f"output.{key}"):
-        run(beets_env, capsys)
-
-
 def ordered_blocks(output: str) -> list[list[str]]:
     """The blocks printed (separated by blank lines), in order, as lists of lines."""
     return [block.splitlines() for block in output.split("\n\n") if block]

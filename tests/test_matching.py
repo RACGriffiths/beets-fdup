@@ -165,7 +165,8 @@ class TestMatching:
 class TestExactKey:
 
     def test_same_key_matches_despite_different_titles(self):
-        matches = matches_of([("Sinatra", "Theme From New York, New York", "w1"), ("Sinatra", "New York, New York", "w1")])
+        matches = matches_of([("Sinatra", "Theme From New York, New York", "w1"),
+                              ("Sinatra", "New York, New York", "w1")])
         assert matches[("Theme From New York, New York", "New York, New York")].fits["title"] == 1.0
 
     def test_different_keys_never_match(self):
@@ -184,5 +185,6 @@ class TestExactKey:
         assert matches_of([("Leonard Cohen", "Hallelujah", "w1"), ("Jeff Buckley", "Hallelujah", "w1")]) == {}
 
     def test_exact_key_disabled(self):
-        matches = matches_of([("Muse", "Intro", "w1"), ("Muse", "intro", "w2")], field_configs={"title": {"exact_key": None}})
+        matches = matches_of([("Muse", "Intro", "w1"), ("Muse", "intro", "w2")],
+                             field_configs={"title": {"exact_key": None}})
         assert len(matches) == 2

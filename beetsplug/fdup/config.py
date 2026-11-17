@@ -47,7 +47,9 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "alphabet": "abcdefghijklmnopqrstuvwxyz 0123456789",   # Characters fingerprinted; others are ignored.
         "word_size": 1536,
         "match_threshold": 0.75,
-        "difference_penalty": 0.025,  # Kept low e.g. < 0.05 (additional characters don't necessarily matter much, can include qualifying info e.g. (live) or whatever)
+        # How much each n-gram in only one of the two values lowers the score. Keep it low (under ~0.05): extra words,
+        # e.g. a qualifier such as '(live)', don't make a value a different song.
+        "difference_penalty": 0.025,
         # 'overlap': shared n-grams relative to the shorter value, so 'abba' matches 'abba & friends'.
         # 'dice': relative to both values, so a short value doesn't match a longer one just by being in it.
         "metric": "overlap",
@@ -99,14 +101,6 @@ DEFAULT_CONFIG: dict[str, Any] = {
     },
 }
 
-# Output settings that have been replaced, and by what.
-_REPLACED_OUTPUT_KEYS = {
-    "src_fmt": "output.format and output.by_track.prefix",
-    "dup_fmt": "output.format and output.by_track.prefix",
-    "separator": "output.groups.separator and output.by_track.separator",
-}
-
-
 def build_field_matchers(config: confuse.ConfigView, threshold: float | None = None) -> list[FieldMatcher]:
     """A FieldMatcher for each configured field, set up from the field's own config or the defaults.
     threshold, if given, overrides every field's match_threshold (the --match-threshold option)."""
@@ -146,9 +140,6 @@ def build_output_format(config: confuse.ConfigView, grouped: bool, format_overri
     """The output settings for printing groups, or by track. format_override, if given, overrides the configured
     format (the --format option)."""
     output = config["output"]
-    for key, replacement in _REPLACED_OUTPUT_KEYS.items():
-        if output[key].exists():
-            raise UserError(f"fdup: the output.{key} setting has been replaced by {replacement} (see the README)")
     mode_name = "groups" if grouped else "by_track"
     mode = output[mode_name]
     return OutputFormat(
