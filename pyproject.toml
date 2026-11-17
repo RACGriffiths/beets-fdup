@@ -30,7 +30,7 @@ dev = [
     "pytest-cov",
     "responses",       # needed by beets' test helpers (beets.test.helper)
     "ruff",
-    "line_profiler",   # scripts/profile.py
+    "line_profiler",   # kernprof, for line-level timings (see scripts/profile_fdup.py)
 ]
 
 [build-system]
