@@ -205,3 +205,7 @@ Layout:
 | `scripts/profile_fdup.py` | profile a `beet fdup` run with cProfile (or see its docstring for line_profiler) |
 
 `beetsplug/` deliberately has no `__init__.py`: it's a namespace package shared with beets and its other plugins.
+
+## License
+
+MIT: see [LICENSE](LICENSE).
