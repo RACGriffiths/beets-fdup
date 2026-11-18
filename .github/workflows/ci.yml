@@ -95,3 +95,20 @@ jobs:
           name: dist
           path: dist/
           if-no-files-found: error
+
+  # The one check a pull request must pass to merge into main (Settings → Rules), so the jobs above can change, such as
+  # a Python version added to the matrix, without changing the rule.
+  ci-passed:
+    name: CI passed
+    if: always()
+    needs: [test, lint, package]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check every job passed
+        env:
+          RESULTS: ${{ join(needs.*.result, ' ') }}
+        run: |
+          echo "Results: $RESULTS"
+          for result in $RESULTS; do
+            [ "$result" = success ] || exit 1
+          done

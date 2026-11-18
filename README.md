@@ -17,9 +17,12 @@ and labels the differences between versions (live, remix, remaster, ...), while 
 Fuzzy matching can give false positives and false negatives, so fdup only reports what it finds: it never changes,
 moves or deletes anything. Human review of the output, rather than automated processing, is highly recommended.
 
-fdup's results should largely be similar to those of `beet duplicates -k mb_workid`: on a well-tagged test library they
-agree over 95% of the time. The difference is that fdup should also work reasonably well on tracks that haven't been
-matched with MusicBrainz, or have no `mb_workid`.
+Where both tracks have a MusicBrainz work ID, fdup uses it to decide whether their titles match, so there its results
+are close to those of `beet duplicates --strict -k mb_artistid -k mb_workid`. The difference is that fdup also finds
+duplicates among tracks that haven't been matched with MusicBrainz, or have no `mb_workid`, by matching their titles.
+That works well on its own: on a 42,000-track test library, with work IDs ignored, fdup found 98% of the pairs of
+tracks with the same artist and work IDs, and where both tracks in a pair it found had a work ID, it was the same work
+96% of the time.
 
 Care has been taken to keep it efficient: in testing, a 42,000-track library took about 5 seconds (on a laptop, with
 the default config). But fuzzy matching compares every pair of values, so the time grows with the square of the
