@@ -11,8 +11,10 @@
 # v0.1.0), fix it and tag again. A version can only be uploaded to PyPI once, so after an upload, fix it in a new one.
 #
 # Uploads use PyPI's trusted publishing: pypi.org is set up to accept beets-fdup from this workflow file, in this
-# repository's `pypi` environment, so there's no API token to store or leak. The environment's settings (Settings →
-# Environments) can require approval before each upload.
+# repository's `pypi` environment, so there's no API token to store or leak. The environment (Settings → Environments)
+# only accepts v* tags, and waits for the maintainer's approval before the upload: the run's page in the Actions tab
+# shows a "Review deployments" button. Releases are immutable once published (Settings → General), so the GitHub
+# release's files and tag can't change afterwards.
 
 name: Release
 
