@@ -1,0 +1,98 @@
+# Publishes a release to PyPI when a version tag (v0.1.0, ...) is pushed.
+#
+# To release: in a pull request, set the version in pyproject.toml and date its CHANGELOG entry
+# (`## 0.1.0 (2026-11-18)`). Once that's merged, tag the merge commit and push the tag:
+#
+#   git switch main && git pull && git tag v0.1.0 && git push origin v0.1.0
+#
+# This then runs the whole of CI on the tagged commit, checks that the tag matches pyproject.toml and the CHANGELOG and
+# is on main, uploads the package CI built to PyPI, and creates a GitHub release with the CHANGELOG entry as its notes.
+# If anything fails before the upload, nothing is published: delete the tag (git push origin :v0.1.0; git tag -d
+# v0.1.0), fix it and tag again. A version can only be uploaded to PyPI once, so after an upload, fix it in a new one.
+#
+# Uploads use PyPI's trusted publishing: pypi.org is set up to accept beets-fdup from this workflow file, in this
+# repository's `pypi` environment, so there's no API token to store or leak. The environment's settings (Settings →
+# Environments) can require approval before each upload.
+
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+jobs:
+  ci:
+    uses: ./.github/workflows/ci.yml
+
+  check:
+    name: check version
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          fetch-depth: 0   # all of main's history, to check the tag is on it
+          persist-credentials: false
+      - name: Check the tag against pyproject.toml, the CHANGELOG and main
+        run: |
+          version=$(python3 -c 'import tomllib; print(tomllib.load(open("pyproject.toml", "rb"))["project"]["version"])')
+          if [ "$GITHUB_REF_NAME" != "v$version" ]; then
+            echo "::error::The tag $GITHUB_REF_NAME doesn't match the version in pyproject.toml ($version)"
+            exit 1
+          fi
+          if ! grep -qE "^## ${version//./\\.} \([0-9]{4}-[0-9]{2}-[0-9]{2}\)$" CHANGELOG.md; then
+            echo "::error::CHANGELOG.md has no dated entry for $version, such as '## $version (2026-11-18)'"
+            exit 1
+          fi
+          if ! git merge-base --is-ancestor "$GITHUB_SHA" origin/main; then
+            echo "::error::The tag $GITHUB_REF_NAME isn't on main"
+            exit 1
+          fi
+
+  publish:
+    name: publish to PyPI
+    needs: [ci, check]
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/project/beets-fdup/
+    permissions:
+      id-token: write   # trusted publishing: proves to PyPI that the upload comes from this workflow
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333  # v8.0.2
+        with:
+          name: dist
+          path: dist/
+      - uses: pypa/gh-action-pypi-publish@7245906fb61fa33a13554f9d5fb856fe61758086  # v1.14.3
+
+  github-release:
+    name: GitHub release
+    needs: publish
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write   # to create the release
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333  # v8.0.2
+        with:
+          name: dist
+          path: dist/
+      - name: Create the release, with the CHANGELOG entry as its notes
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # The lines of this version's entry, up to the next one, with wrapped list items joined back into one line
+          # (GitHub shows each line break in release notes).
+          awk -v v="${GITHUB_REF_NAME#v}" '
+            /^## / { p = ($2 == v); next }
+            !p { next }
+            /^ +[^ ]/ && line != "" { sub(/^ +/, " "); line = line $0; next }
+            { if (n++) print line; line = $0 }
+            END { print line }
+          ' CHANGELOG.md > notes.md
+          gh release create "$GITHUB_REF_NAME" dist/* --repo "$GITHUB_REPOSITORY" --verify-tag \
+            --title "$GITHUB_REF_NAME" --notes-file notes.md

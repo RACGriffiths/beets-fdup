@@ -1,0 +1,14 @@
+# Keeps the actions in .github/workflows up to date. They're pinned to commit hashes, with the version in a comment (a
+# tag can be moved to other code, a hash can't): Dependabot updates both, in one pull request a month at most.
+
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+    cooldown:
+      default-days: 7   # only versions released at least a week ago, so a compromised release is likely caught first
+    groups:
+      actions:
+        patterns: ["*"]

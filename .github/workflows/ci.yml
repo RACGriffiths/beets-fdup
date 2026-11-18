@@ -1,4 +1,5 @@
-# Tests with the oldest supported versions (see pyproject.toml) and with the latest beets, and lint.
+# Tests with the oldest supported versions (see pyproject.toml) and with the latest beets, lint, and a check that the
+# package builds and installs. release.yml runs this too, before publishing, and uploads the package built here.
 #
 # fdup reads the library through some beets internals (see beetsplug/fdup/items.py), so a new beets release can break
 # it: the latest-beets jobs catch that, and the weekly schedule runs them without a push. (GitHub turns a public repo's
@@ -13,6 +14,7 @@ on:
   schedule:
     - cron: "23 5 * * 1"   # Mondays, 05:23 UTC
   workflow_dispatch:       # "Run workflow" button in the Actions tab
+  workflow_call:           # from release.yml
 
 permissions:
   contents: read
@@ -37,8 +39,10 @@ jobs:
           - python: "3.14"
             deps: beets
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-python@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0  # v7.1.0
         with:
           python-version: ${{ matrix.python }}
           cache: pip
@@ -54,9 +58,40 @@ jobs:
   lint:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-python@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0  # v7.1.0
         with:
           python-version: "3.13"
       - run: pip install ruff
       - run: ruff check .
+
+  # Builds the sdist and wheel that release.yml uploads to PyPI. The tests above use an editable install, so this also
+  # checks that the wheel has everything the plugin needs.
+  package:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0  # v7.1.0
+        with:
+          python-version: "3.13"
+      - run: pip install build twine
+      - run: python -m build
+      - name: Check the metadata (and that PyPI can render the README)
+        run: twine check --strict dist/*
+      - name: Check the wheel installs and beets loads the plugin from it
+        run: |
+          python -m venv "$RUNNER_TEMP/venv"
+          "$RUNNER_TEMP/venv/bin/pip" install dist/*.whl
+          export BEETSDIR="$RUNNER_TEMP/beets"
+          mkdir "$BEETSDIR"
+          printf 'library: %s/library.db\nplugins: [fdup]\n' "$BEETSDIR" > "$BEETSDIR/config.yaml"
+          "$RUNNER_TEMP/venv/bin/beet" fdup
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
+        with:
+          name: dist
+          path: dist/
+          if-no-files-found: error
