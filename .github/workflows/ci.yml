@@ -80,8 +80,8 @@ jobs:
           python-version: "3.13"
       - run: pip install build twine
       - run: python -m build
-      - name: Check the metadata (and that PyPI can render the README)
-        run: twine check --strict dist/*
+      - name: Check the package metadata
+        run: twine check --strict dist/*   # (it renders reStructuredText descriptions, but not Markdown ones like ours)
       - name: Check the wheel installs and beets loads the plugin from it
         run: |
           python -m venv "$RUNNER_TEMP/venv"
