@@ -2,7 +2,7 @@
 
 All notable changes to beets-fdup are listed here. Versions follow [semantic versioning](https://semver.org/).
 
-## 0.1.0 (unreleased)
+## 0.1.0 (2026-11-18)
 
 First public release.
 

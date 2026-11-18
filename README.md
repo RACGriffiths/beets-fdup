@@ -14,18 +14,29 @@ differ, for example:
 and labels the differences between versions (live, remix, remaster, ...), while not matching titles such as
 `Exogenesis: Symphony, Part 2` and `Part 3`.
 
-fdup only reports what it finds: it never changes, moves or deletes anything. It's quick, too: a whole 42,000-track
-library takes about 5 seconds.
+Fuzzy matching can give false positives and false negatives, so fdup only reports what it finds: it never changes,
+moves or deletes anything. Human review of the output, rather than automated processing, is highly recommended.
+
+Where both tracks have a MusicBrainz work ID, fdup uses it to decide whether their titles match, so there its results
+are close to those of `beet duplicates --strict -k mb_artistid -k mb_workid`. The difference is that fdup also finds
+duplicates among tracks that haven't been matched with MusicBrainz, or have no `mb_workid`, by matching their titles.
+That works well on its own: on a 42,000-track test library, with work IDs ignored, fdup found 98% of the pairs of
+tracks with the same artist and work IDs, and where both tracks in a pair it found had a work ID, it was the same work
+96% of the time.
+
+Care has been taken to keep it efficient: in testing, a 42,000-track library took about 5 seconds (on a laptop, with
+the default config). But fuzzy matching compares every pair of values, so the time grows with the square of the
+library's size, and *extremely* large libraries may still take a while.
 
 ## Installation
 
 Install it into the same Python environment as beets:
 
 ```bash
-pip install git+https://github.com/RACGriffiths/beets-fdup.git
+pip install beets-fdup
 ```
 
-(If you installed beets with pipx: `pipx inject beets git+https://github.com/RACGriffiths/beets-fdup.git`.)
+(If you installed beets with pipx: `pipx inject beets beets-fdup`.)
 
 Then enable it in your beets config (`beet config -e`):
 
@@ -40,10 +51,10 @@ Requires Python 3.11+ and beets 2.10+.
 ```bash
 beet fdup                                   # all duplicates in the library, in groups that all match each other
 beet fdup artist:queen                      # duplicates among Queen tracks
-beet fdup --against-all album:greatest      # tracks on 'greatest...' albums with a duplicate anywhere in the library
+beet fdup --against-all added:-1w..         # tracks added in the last week with a duplicate anywhere in the library
 beet fdup year:..1980 ~~~ year:1981..       # duplicates of pre-1981 tracks among later ones
-beet fdup --by-track                        # each track, followed by its duplicates, instead of groups
-beet fdup --match-threshold 0.9             # stricter matching (1.0 = perfect match)
+beet fdup --by-track                        # each track, followed by its duplicates, instead of groups (longer output)
+beet fdup --match-threshold 0.9             # stricter matching (1.0 = perfect match; the default, 0.75, is recommended)
 beet fdup -f '$album: $title'               # print each track with this format (also --format)
 beet fdup artist:queen year-                # sorted by year, newest first, instead of the configured sort
 ```
@@ -378,7 +389,9 @@ python3 -m venv .venv
 ```
 
 CI (`.github/workflows/ci.yml`) runs the tests on every push and pull request, and weekly, with the oldest supported
-versions (Python 3.11, beets 2.10, numpy 2.0) and with the latest beets on Python 3.12 to 3.14, and runs ruff.
+versions (Python 3.11, beets 2.10, numpy 2.0) and with the latest beets on Python 3.12 to 3.14, runs ruff, and builds
+the package. Pushing a version tag publishes that version to PyPI (`.github/workflows/release.yml`, which describes
+the steps).
 
 Layout:
 
