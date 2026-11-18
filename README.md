@@ -390,8 +390,9 @@ python3 -m venv .venv
 
 CI (`.github/workflows/ci.yml`) runs the tests on every push and pull request, and weekly, with the oldest supported
 versions (Python 3.11, beets 2.10, numpy 2.0) and with the latest beets on Python 3.12 to 3.14, runs ruff, and builds
-the package. Pushing a version tag publishes that version to PyPI (`.github/workflows/release.yml`, which describes
-the steps).
+the package. `.github/workflows/beets-dev.yml` also runs the tests weekly against beets' development branch, to find
+beets changes that break fdup before they're released: when they fail, it opens an issue. Pushing a version tag
+publishes that version to PyPI (`.github/workflows/release.yml`, which describes the steps).
 
 Layout:
 

@@ -1,0 +1,107 @@
+# Runs the tests once a week against beets' development branch (the default branch of github.com/beetbox/beets), to
+# find beets changes that break fdup before they're released, so a fixed fdup can be ready, or released, in time.
+# fdup reads the library through some beets internals (see beetsplug/fdup/items.py), so it's more likely than most
+# plugins to be broken by them.
+#
+# Unlike ci.yml, this doesn't run on pull requests (except ones that change this file), and isn't needed to merge
+# them: beets' development branch can break for reasons of its own, and a fix may have to wait for beets to change.
+# Instead, when a run on main fails, it opens an issue (or comments on the one already open), and the first run that
+# passes again closes it. To try a fix on a branch first: Actions tab → this workflow → "Run workflow", and pick the
+# branch (runs on other branches don't touch the issue).
+#
+# (GitHub turns a public repo's schedules off after 60 days without activity: the Actions tab has a button to turn
+# them back on.)
+
+name: beets development branch
+
+on:
+  schedule:
+    - cron: "47 5 * * 1"   # Mondays, 05:47 UTC
+  workflow_dispatch:       # "Run workflow" button in the Actions tab
+  pull_request:
+    paths: [.github/workflows/beets-dev.yml]   # to try changes to this workflow before merging them
+
+permissions:
+  contents: read
+
+env:
+  PIP_DISABLE_PIP_VERSION_CHECK: "1"
+
+jobs:
+  test:
+    name: test (Python 3.14, beets' development branch)
+    runs-on: ubuntu-latest
+    outputs:
+      beets-commit: ${{ steps.beets.outputs.commit }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0  # v7.1.0
+        with:
+          python-version: "3.14"
+      - name: Find beets' latest commit
+        id: beets
+        run: |
+          commit=$(git ls-remote https://github.com/beetbox/beets.git HEAD | cut -f1)
+          [ -n "$commit" ]
+          echo "beets commit: https://github.com/beetbox/beets/commit/$commit"
+          echo "commit=$commit" >> "$GITHUB_OUTPUT"
+      - name: Install
+        id: install
+        env:
+          COMMIT: ${{ steps.beets.outputs.commit }}
+        run: |
+          # beets (with its dependencies, numpy among them), then fdup without its own: if beets' version has moved
+          # outside the range pyproject.toml allows (to 3.0, say), the tests still run, and the last step fails.
+          pip install "beets @ git+https://github.com/beetbox/beets.git@$COMMIT" pytest responses
+          pip install --no-deps -e .
+          pip list | grep -iE '^(beets|numpy|confuse) '
+      - run: pytest
+      - name: Check beets' version is one pyproject.toml allows
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        run: pip check
+
+  # A job of its own, so the token that can write issues is never in a job that runs beets' unreleased code.
+  report:
+    name: open or close the issue
+    needs: test
+    if: ${{ !cancelled() && github.ref == 'refs/heads/main' }}
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+    steps:
+      - name: Open, comment on or close the issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RESULT: ${{ needs.test.result }}
+          COMMIT: ${{ needs.test.outputs.beets-commit }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          label=beets-dev
+          if [ -n "$COMMIT" ]; then
+            beets="beets' development branch at [${COMMIT:0:9}](https://github.com/beetbox/beets/commit/$COMMIT)"
+          else
+            beets="beets' development branch"
+          fi
+          issue=$(gh issue list --label "$label" --state open --json number --jq '.[0].number // empty')
+          if [ "$RESULT" = success ]; then
+            if [ -n "$issue" ]; then
+              gh issue close "$issue" --comment "The tests pass again with $beets: $RUN_URL"
+            fi
+          elif [ -n "$issue" ]; then
+            gh issue comment "$issue" --body "Still failing with $beets: $RUN_URL"
+          else
+            gh label create "$label" --color d93f0b \
+              --description "fdup's tests fail against beets' development branch" 2>/dev/null || true
+            # (GitHub shows each line break in an issue, so one sentence per line.)
+            gh issue create --title "Tests fail against beets' development branch" --label "$label" --body-file - <<EOF
+          The weekly run of the tests against $beets failed: $RUN_URL
+
+          An unreleased change in beets breaks fdup or its tests (unless beets' development branch is broken itself).
+          Fixing it now means a fixed fdup can be released before, or along with, the beets release that brings it.
+
+          Opened by \`.github/workflows/beets-dev.yml\`: each failing run comments here, and a passing run closes it.
+          EOF
+          fi

@@ -2,6 +2,8 @@
 
 These guard the parts of fdup that rely on beets internals: if a beets upgrade changes them, these should fail."""
 
+import os
+
 import pytest
 
 from beetsplug.fdup.items import MinItem, fetch_items, template_fields
@@ -41,7 +43,9 @@ def test_same_items_and_values_as_lib_items(env, query):
 
 
 def test_paths_are_absolute(env):
-    assert all(item["path"].startswith(env.lib.directory) for item in fetch_items(env.lib, {"path"}))
+    # Paths are bytes. So is lib.directory up to beets 2.14.1, but it's a Path after that: fsencode takes either.
+    directory = os.fsencode(env.lib.directory)
+    assert all(item["path"].startswith(directory) for item in fetch_items(env.lib, {"path"}))
 
 
 def test_min_item_formats_like_an_item(env):
