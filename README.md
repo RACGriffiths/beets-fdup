@@ -22,10 +22,10 @@ library takes about 5 seconds.
 Install it into the same Python environment as beets:
 
 ```bash
-pip install git+https://gitlab.com/racgriffiths/beet-fdup.git
+pip install git+https://github.com/RACGriffiths/beets-fdup.git
 ```
 
-(If you installed beets with pipx: `pipx inject beets git+https://gitlab.com/racgriffiths/beet-fdup.git`.)
+(If you installed beets with pipx: `pipx inject beets git+https://github.com/RACGriffiths/beets-fdup.git`.)
 
 Then enable it in your beets config (`beet config -e`):
 
@@ -377,8 +377,8 @@ python3 -m venv .venv
 .venv/bin/ruff check .              # lint
 ```
 
-CI (`.gitlab-ci.yml`) runs the tests with the oldest supported versions (Python 3.11, beets 2.10, numpy 2.0) and with
-the latest beets on Python 3.12 to 3.14, and runs ruff.
+CI (`.github/workflows/ci.yml`) runs the tests on every push and pull request, and weekly, with the oldest supported
+versions (Python 3.11, beets 2.10, numpy 2.0) and with the latest beets on Python 3.12 to 3.14, and runs ruff.
 
 Layout:
 
@@ -400,4 +400,4 @@ Layout:
 
 ## License
 
-MIT: see [LICENSE](LICENSE).
+MIT: see [LICENSE](https://github.com/RACGriffiths/beets-fdup/blob/main/LICENSE).

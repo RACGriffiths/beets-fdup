@@ -1,0 +1,62 @@
+# Tests with the oldest supported versions (see pyproject.toml) and with the latest beets, and lint.
+#
+# fdup reads the library through some beets internals (see beetsplug/fdup/items.py), so a new beets release can break
+# it: the latest-beets jobs catch that, and the weekly schedule runs them without a push. (GitHub turns a public repo's
+# schedules off after 60 days without activity: the Actions tab has a button to turn them back on.)
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    - cron: "23 5 * * 1"   # Mondays, 05:23 UTC
+  workflow_dispatch:       # "Run workflow" button in the Actions tab
+
+permissions:
+  contents: read
+
+env:
+  PIP_DISABLE_PIP_VERSION_CHECK: "1"
+
+jobs:
+  test:
+    name: test (Python ${{ matrix.python }}, ${{ matrix.deps }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - python: "3.11"
+            deps: "beets==2.10.* numpy==2.0.*"
+          - python: "3.12"
+            deps: beets
+          - python: "3.13"
+            deps: beets
+          - python: "3.14"
+            deps: beets
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: ${{ matrix.python }}
+          cache: pip
+          cache-dependency-path: pyproject.toml
+      - name: Install
+        env:
+          DEPS: ${{ matrix.deps }}
+        run: |
+          pip install -e . $DEPS pytest responses
+          pip list | grep -iE '^(beets|numpy) '
+      - run: pytest
+
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+      - run: pip install ruff
+      - run: ruff check .

@@ -31,7 +31,9 @@ classifiers = [
 ]
 
 [project.urls]
-Repository = "https://gitlab.com/racgriffiths/beet-fdup"
+Repository = "https://github.com/RACGriffiths/beets-fdup"
+Issues = "https://github.com/RACGriffiths/beets-fdup/issues"
+Changelog = "https://github.com/RACGriffiths/beets-fdup/blob/main/CHANGELOG.md"
 
 [project.optional-dependencies]
 # Development tools: pip install -e ".[dev]"
